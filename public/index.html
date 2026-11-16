@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#b8472f">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="Ammon Family Values - our shared family budget.">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <title>Ammon Family Values</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <noscript><p class="notice error">Ammon Family Values needs JavaScript turned on.</p></noscript>
+
+  <!-- Shown if the page is not served over HTTPS (encryption needs a secure connection) -->
+  <main id="insecure" class="screen center" hidden>
+    <h1>Secure connection needed</h1>
+    <p class="lead">Ammon Family Values encrypts your numbers on this phone, which only works over a secure (https) address. Open the https link your family organizer sent you.</p>
+  </main>
+
+  <!-- Welcome / first run -->
+  <main id="welcome" class="screen center" hidden>
+    <img class="brand-mark" src="/icons/icon-192.png" alt="" width="96" height="96">
+    <h1>Ammon Family Values</h1>
+    <p class="lead">Our family's money, together. Everyone can update the numbers, and everyone sees the changes live.</p>
+    <ul class="promises">
+      <li>Only numbers are saved. No names, no places.</li>
+      <li>Locked with a family key on your phone before anything is shared.</li>
+    </ul>
+    <button id="btn-new" class="btn btn-primary btn-xl" type="button">Set up our budget</button>
+    <div class="divider"><span>Already have an invite?</span></div>
+    <form id="join-form" class="stack" novalidate>
+      <label class="field-label" for="join-input">Paste the invite link here</label>
+      <input id="join-input" class="input" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste invite link">
+      <button class="btn btn-secondary btn-xl" type="submit">Join our family budget</button>
+    </form>
+    <p id="welcome-error" class="notice error" role="alert" hidden></p>
+  </main>
+
+  <!-- App lock (shown when the optional PIN lock is on) -->
+  <main id="lock" class="screen center" hidden>
+    <img class="brand-mark" src="/icons/icon-192.png" alt="" width="96" height="96">
+    <h1>Ammon Family Values</h1>
+    <p class="lead">Type your PIN to open the budget.</p>
+    <form id="lock-form" class="stack" novalidate>
+      <label class="field-label" for="lock-pin">Your PIN</label>
+      <input id="lock-pin" class="input pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off">
+      <p id="lock-error" class="notice error" role="alert" hidden></p>
+      <button id="lock-go" class="btn btn-primary btn-xl" type="submit">Open</button>
+    </form>
+    <button id="lock-forgot" class="link" type="button">I forgot my PIN</button>
+  </main>
+
+  <!-- The budget -->
+  <div id="budget" hidden>
+    <header class="topbar">
+      <div class="topbar-row">
+        <h1 class="brand">Ammon Family Values</h1>
+        <span id="status" class="pill" data-tone="wait" role="status"><i class="dot" aria-hidden="true"></i><span id="status-text">Connecting…</span></span>
+        <button id="btn-menu" class="icon-btn" type="button" aria-label="Menu">
+          <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><circle cx="5" cy="12" r="2.2" fill="currentColor"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><circle cx="19" cy="12" r="2.2" fill="currentColor"/></svg>
+        </button>
+      </div>
+      <nav class="month-nav" aria-label="Month">
+        <button id="prev-month" class="icon-btn" type="button" aria-label="Previous month">
+          <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <h2 id="month-label" class="month-label"></h2>
+        <button id="next-month" class="icon-btn" type="button" aria-label="Next month">
+          <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </nav>
+    </header>
+
+    <main class="screen">
+      <section class="hero" aria-label="Month summary">
+        <p class="hero-cap">Left to spend this month</p>
+        <p id="sum-left" class="hero-num">$0.00</p>
+        <p id="sum-plan" class="hero-sub"></p>
+        <div class="hero-grid">
+          <div><span class="hero-cap">Money in</span><b id="sum-income">$0.00</b><span id="sum-income-plan" class="hero-small"></span></div>
+          <div><span class="hero-cap">Money out</span><b id="sum-spent">$0.00</b><span id="sum-spent-plan" class="hero-small"></span></div>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="h-income">
+        <h2 id="h-income" class="section-title">Money coming in</h2>
+        <div id="income-list" class="list"></div>
+        <button class="btn btn-outline add-btn" data-kind="i" type="button">+ Add income</button>
+      </section>
+
+      <section class="section" aria-labelledby="h-expense">
+        <h2 id="h-expense" class="section-title">Money going out</h2>
+        <div id="expense-list" class="list"></div>
+        <button class="btn btn-outline add-btn" data-kind="e" type="button">+ Add expense</button>
+      </section>
+    </main>
+  </div>
+
+  <!-- Guided setup: one value at a time -->
+  <section id="wizard" class="wizard" hidden>
+    <div class="wizard-top">
+      <div class="progress" aria-hidden="true"><i id="wiz-progress"></i></div>
+      <div class="wizard-meta">
+        <span id="wiz-step" class="muted"></span>
+        <button id="wiz-exit" class="link" type="button">Close setup</button>
+      </div>
+    </div>
+    <div id="wiz-body" class="wizard-card"></div>
+  </section>
+
+  <!-- Add / edit a category -->
+  <dialog id="dlg-cat" class="sheet-dlg" aria-labelledby="cat-title">
+    <form id="cat-form" class="sheet" novalidate>
+      <h2 id="cat-title">Add item</h2>
+      <label class="field-label" for="cat-name">Name</label>
+      <input id="cat-name" class="input" type="text" maxlength="40" autocomplete="off" placeholder="For example: Groceries">
+      <p class="hint">Use a label for the money, like "Groceries". Please don't put personal names here.</p>
+      <button class="btn btn-primary btn-xl" type="submit">Save</button>
+      <div class="btn-row">
+        <button id="cat-cancel" class="btn btn-ghost" type="button">Cancel</button>
+        <button id="cat-delete" class="btn btn-danger-ghost" type="button">Delete item</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Add to a running total (quick add) -->
+  <dialog id="dlg-add" class="sheet-dlg" aria-labelledby="add-title">
+    <form id="add-form" class="sheet" novalidate>
+      <h2 id="add-title">Add spending</h2>
+      <p class="add-now"><span id="add-now"></span> <b id="add-cur"></b></p>
+      <div class="seg" role="group" aria-label="Add or subtract">
+        <button id="add-mode-add" type="button" aria-pressed="true">Add</button>
+        <button id="add-mode-sub" type="button" aria-pressed="false">Subtract</button>
+      </div>
+      <label class="wiz-money" for="add-amt"><span id="add-sym" class="cur">$</span><input id="add-amt" class="wiz-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="Amount"></label>
+      <p id="add-preview" class="hint" aria-live="polite"></p>
+      <p id="add-error" class="notice error" role="alert" hidden></p>
+      <button id="add-go" class="btn btn-primary btn-xl" type="submit">Add it</button>
+      <button id="add-cancel" class="btn btn-ghost" type="button">Cancel</button>
+    </form>
+  </dialog>
+
+  <!-- Choose or confirm a PIN -->
+  <dialog id="dlg-pin" class="sheet-dlg" aria-labelledby="pin-title">
+    <form id="pin-form" class="sheet" novalidate>
+      <h2 id="pin-title">PIN</h2>
+      <p id="pin-text"></p>
+      <label class="field-label" for="pin-input">PIN (4 to 8 numbers)</label>
+      <input id="pin-input" class="input pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off">
+      <div id="pin-confirm-wrap" class="stack" hidden>
+        <label class="field-label" for="pin-confirm">Type it again</label>
+        <input id="pin-confirm" class="input pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off">
+      </div>
+      <p id="pin-error" class="notice error" role="alert" hidden></p>
+      <button id="pin-go" class="btn btn-primary btn-xl" type="submit">OK</button>
+      <button id="pin-cancel" class="btn btn-ghost" type="button">Cancel</button>
+    </form>
+  </dialog>
+
+  <!-- Menu -->
+  <dialog id="dlg-menu" class="sheet-dlg" aria-labelledby="menu-title">
+    <div class="sheet">
+      <h2 id="menu-title">Menu</h2>
+      <button id="m-invite" class="menu-btn" type="button">Invite family</button>
+      <button id="m-setup" class="menu-btn" type="button">Guided setup for this month</button>
+      <button id="m-copyplan" class="menu-btn" type="button">Copy last month's planned amounts</button>
+      <button id="m-lock" class="menu-btn" type="button">Turn on app lock (PIN)</button>
+      <button id="m-rotate" class="menu-btn" type="button">Remove someone: make a new key</button>
+      <div class="menu-row">
+        <label for="m-currency">Currency</label>
+        <select id="m-currency" class="input select">
+          <option value="USD">US dollar ($)</option>
+          <option value="CAD">Canadian dollar</option>
+          <option value="EUR">Euro</option>
+          <option value="GBP">British pound</option>
+          <option value="MXN">Mexican peso</option>
+          <option value="AUD">Australian dollar</option>
+        </select>
+      </div>
+      <label class="menu-row switch-row" for="m-size">
+        <span>Extra-large text</span>
+        <input id="m-size" type="checkbox" class="switch">
+      </label>
+      <button id="m-wipe" class="menu-btn danger" type="button">Delete all data from the server</button>
+      <button id="m-leave" class="menu-btn danger" type="button">Remove this budget from this phone</button>
+      <button id="m-close" class="btn btn-ghost" type="button">Close</button>
+    </div>
+  </dialog>
+
+  <!-- Invite -->
+  <dialog id="dlg-invite" class="sheet-dlg" aria-labelledby="invite-title">
+    <div class="sheet">
+      <h2 id="invite-title">Invite your family</h2>
+      <p>Send this link to family. Anyone who opens it can see and edit the budget, so only share it with people you trust.</p>
+      <canvas id="invite-qr" class="qr" role="img" aria-label="QR code for the invite link. Another phone can scan it with its camera to join." width="1" height="1"></canvas>
+      <p id="invite-qr-cap" class="hint cap">Or let someone scan this with their phone camera. Only show it to people you trust.</p>
+      <textarea id="invite-link" class="input link-box" readonly rows="3" aria-label="Invite link"></textarea>
+      <button id="btn-share" class="btn btn-primary btn-xl" type="button">Share link</button>
+      <button id="btn-copy" class="btn btn-secondary" type="button">Copy link</button>
+      <p class="hint">The link contains the family key. Keep it like a house key: if it is lost, nobody can recover the data.</p>
+      <button id="invite-close" class="btn btn-ghost" type="button">Done</button>
+    </div>
+  </dialog>
+
+  <div id="busy" role="status" aria-live="polite" hidden></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

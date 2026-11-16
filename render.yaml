@@ -1,0 +1,14 @@
+# Render "Blueprint": lets you deploy this folder as a free web service without filling in the form by hand.
+# Not tested against a real Render account. The field names match Render's blueprint docs.
+# Render supplies the PORT variable itself (default 10000) and the server listens on it.
+services:
+  - type: web
+    name: ammon-family-values
+    runtime: node
+    plan: free
+    buildCommand: echo "nothing to build"
+    startCommand: node server/server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: TRUST_PROXY
+        value: "1"

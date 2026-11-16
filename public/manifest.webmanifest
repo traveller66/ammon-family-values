@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "Ammon Family Values",
+  "short_name": "Ammon Values",
+  "description": "Our shared family budget. Numbers only, encrypted, live for everyone.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fbf5ec",
+  "theme_color": "#b8472f",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
