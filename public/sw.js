@@ -1,7 +1,7 @@
 // Offline shell: the app opens instantly and works without a connection.
 // Strategy: serve from cache, refresh the cache in the background. Never touches /api/.
 // To force an update for everyone, bump CACHE.
-const CACHE = 'ammon-family-values-v2';
+const CACHE = 'ammon-family-values-v3';
 const SHELL = [
   '/', '/index.html', '/style.css', '/app.js', '/model.js', '/sync.js', '/vault.js', '/store.js',
   '/lock.js', '/rotate.js', '/qr.js',

@@ -104,6 +104,7 @@ async function enter(key, creator) {
   sync = new SyncClient({
     vault,
     creator,
+    live: false, // connect only to sync (on open and on each save) so the server can stay asleep
     onRecord: (rid, payload, seq) => {
       if (budget.apply(rid, payload, seq)) scheduleRender();
     },
@@ -144,6 +145,7 @@ function leaveLocal(message) {
 const STATUS = {
   connecting: ['Connecting…', 'wait'],
   online: ['Live', 'ok'],
+  idle: ['Saved', 'ok'],
   reconnecting: ['Reconnecting…', 'wait'],
   offline: ['Offline, saved here', 'off'],
   missing: ['Not found', 'bad'],
@@ -861,7 +863,7 @@ async function toggleLock() {
 async function rotateKeyFlow() {
   $('#dlg-menu').close();
   if (!sync || !familyKey) return;
-  if (sync.status !== 'online') {
+  if (sync.status !== 'online' && sync.status !== 'idle') {
     toast('Connect to the internet first, then try again.');
     return;
   }

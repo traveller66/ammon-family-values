@@ -53,12 +53,12 @@ const memStore = () => {
   const m = new Map();
   return { get: (k) => m.get(k) ?? null, set: (k, v) => m.set(k, String(v)), del: (k) => m.delete(k), clearAll: () => m.clear() };
 };
-async function phone(key, { creator = false, st = memStore(), base = BASE } = {}) {
+async function phone(key, { creator = false, st = memStore(), base = BASE, live = true } = {}) {
   const vault = await deriveVault(key);
   const budget = new Budget();
   const p = { key, vault, budget, st, status: 'connecting' };
   p.sync = new SyncClient({
-    vault, creator, baseUrl: base, store: st,
+    vault, creator, baseUrl: base, store: st, live,
     onRecord: (rid, payload, seq) => budget.apply(rid, payload, seq),
     onStatus: (s) => { p.status = s; },
     onReset: () => budget.resetSeqs(),
@@ -295,6 +295,34 @@ await step('new key: a lost reply to the delete is recognised as success, not ro
   const nv = await deriveVault(newKey);
   assert.equal((await rawFor(nv, '/records')).status, 200); // the new budget stands
   assert.equal((await rawFor(A.vault, '/records')).status, 410);
+});
+
+// ---------------------------------------------------------------- on-demand sync
+await step('on-demand mode holds no connection: it syncs on open, on each save and on wake-up only', async () => {
+  const key = newFamilyKey();
+  const A = await phone(key, { creator: true, live: false });
+  const cat = await addCat(A, 'Quiet', 'e', 0);
+  await setVal(A, cat, 'a', 100, MONTH);
+  await waitFor(() => A.status === 'idle' && Object.keys(A.sync.outbox).length === 0, 6000, 'A to sync and go idle');
+  assert.equal(A.sync.ctrl, null); // no event stream is open
+  const B = await phone(key); // a live phone, to see what reaches the server
+  await waitFor(() => B.budget.get(cat, MONTH, 'a') === 100, 6000, 'the save to have reached the server');
+  await setVal(B, cat, 'p', 5000, MONTH);
+  await waitFor(() => synced(B), 6000, 'B to save');
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(A.budget.get(cat, MONTH, 'p') ?? 0, 0); // A is disconnected, so it has not heard yet
+  assert.equal(A.status, 'idle');
+  await setVal(A, cat, 'a', 250, MONTH); // a save makes one sync: sends this and fetches B's change
+  await waitFor(() => A.budget.get(cat, MONTH, 'p') === 5000 && A.status === 'idle', 6000, 'A to pick up B on its own save');
+  await waitFor(() => B.budget.get(cat, MONTH, 'a') === 250, 6000, "A's save to reach B");
+  await setVal(B, cat, 'p', 6000, MONTH);
+  await waitFor(() => synced(B), 6000, 'B to save again');
+  A.sync.lastData = 0; // as if the app had been in the background for a while
+  A.sync.kickIfStale(); // what the app does when it comes back to the front
+  await waitFor(() => A.budget.get(cat, MONTH, 'p') === 6000 && A.status === 'idle', 6000, 'A to refresh on wake-up');
+  assert.equal(A.sync.ctrl, null);
+  A.sync.stop();
+  B.sync.stop();
 });
 
 // ---------------------------------------------------------------- big backlog

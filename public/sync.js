@@ -7,13 +7,16 @@ import { store as defaultStore } from './store.js';
 const httpError = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
 
 export class SyncClient {
-  constructor({ vault, creator = false, baseUrl = '', store = defaultStore, onRecord, onStatus = () => {}, onReset = () => {} }) {
+  constructor({ vault, creator = false, baseUrl = '', store = defaultStore, live = true, onRecord, onStatus = () => {}, onReset = () => {} }) {
     this.vault = vault;
     this.creator = creator;
     this.base = baseUrl;
     this.store = store;
+    // live=true keeps a connection open for instant updates. live=false connects only to sync (on open and on each save),
+    // then disconnects, so the server can sleep.
+    this.live = live;
     this.onRecord = onRecord; // (rid, payload, seq|null)
-    this.onStatus = onStatus; // 'connecting'|'online'|'reconnecting'|'offline'|'missing'|'unauthorized'|'deleted'
+    this.onStatus = onStatus; // 'connecting'|'online'|'idle'|'reconnecting'|'offline'|'missing'|'unauthorized'|'deleted'
     this.onReset = onReset;
     this.cache = {}; // rid -> {ct, iv, seq}   (sealed, as last confirmed by the server)
     this.outbox = {}; // rid -> {ct, iv}        (sealed edits not yet confirmed)
@@ -271,7 +274,8 @@ export class SyncClient {
     const sealed = await seal(this.vault, rid, payload);
     this.outbox[rid] = sealed;
     this.persistOutbox();
-    if (this.status === 'online') this.flush().catch(() => this.kick());
+    if (!this.live) this.kick(); // on-demand: wake the loop for one sync, then it disconnects again
+    else if (this.status === 'online') this.flush().catch(() => this.kick());
   }
 
   async deleteRoom() {
@@ -298,8 +302,18 @@ export class SyncClient {
         this.setStatus('connecting');
         await this.connectOnce();
         await this.flush();
-        this.setStatus('online');
         backoff = 1000;
+        if (!this.live) {
+          // On-demand mode: everything is sent and fetched, so hold no connection until the next save or wake-up.
+          this.lastData = Date.now();
+          if (!this.kicked && Object.keys(this.outbox).length === 0) {
+            this.setStatus('idle');
+            await this.sleepWake(2 ** 31 - 1);
+          }
+          this.kicked = false;
+          continue;
+        }
+        this.setStatus('online');
         await this.stream();
       } catch (e) {
         if (!this.running) return;

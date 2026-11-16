@@ -1,9 +1,9 @@
 # Ammon Family Values
 
-A shared family budget that installs on Android like an app, updates live for everyone, and stores **only numbers**: no names, no locations, no user info. Everything is encrypted on the phones before it is synced.
+A shared family budget that installs on Android like an app, keeps everyone's numbers in sync, and stores **only numbers**: no names, no locations, no user info. Everything is encrypted on the phones before it is synced.
 
 - **Client:** installable web app (PWA): plain HTML/CSS/JS, no build step, works offline.
-- **Server:** one zero-dependency Node file (`server/server.js`) that relays encrypted records in real time.
+- **Server:** one zero-dependency Node file (`server/server.js`) that relays encrypted records between the phones.
 - **Needs:** Node 18+ to run the server. Nothing to `npm install`.
 
 ## What is stored, and where
@@ -21,7 +21,7 @@ Every phone keeps a full (encrypted) copy. If the server is wiped (free hosts do
 
 ```bash
 node server/server.js          # http://localhost:8787
-npm test                       # 26 automated checks (starts its own servers)
+npm test                       # 27 automated checks (starts its own servers)
 ```
 
 `localhost` works for trying it out. Phones need **HTTPS** to install the app and to use encryption.
@@ -52,7 +52,8 @@ Treat the invite link like a house key: anyone with it can see and edit the budg
 ## Using it
 
 - **Guided setup** asks for one value per screen. Each screen has an **"I'm asking for"** line (for example "Net income: your take-home pay after taxes") and an **(i)** button. Hover over it on a computer, or tap it on a phone, for a longer explanation. The wording lives in `HELP` in `public/model.js` if you want to change it (for instance to ask for gross income instead of net).
-- **Big boxes:** type a number and it saves by itself; everyone's screen updates live (the pill at the top says **Live**, **Offline, saved here**, etc.).
+- **Big boxes:** type a number and it saves by itself (the pill at the top says **Saved**, **Offline, saved here**, etc.).
+- **Connects only when needed:** the app talks to the server when it opens, when it comes back to the front, and each time a change is saved, then disconnects so a free host can stay asleep. Other phones see your change the next time they open the app or save something. To get instant live updates instead, change `live: false` to `live: true` in `public/app.js`.
 - **+ Add spending** (or **+ Add money received**) on each item: type `12.50` and it is added to the running total. **Subtract** is there for refunds and mistakes.
 - Tap an item's name to rename or delete it; **+ Add income / + Add expense** adds more.
 - Arrows at the top change months. Menu → **Copy last month's planned amounts** saves retyping; **Guided setup for this month** walks through everything again.
@@ -63,8 +64,9 @@ Treat the invite link like a house key: anyone with it can see and edit the budg
 
 ## What was and wasn't verified
 
-- **Verified (automated, `npm test`, 26 checks):** the real server and real client code: live sync, concurrent edits, offline queue, server restart, full server wipe and recovery, delete-all, wrong-key rejection, input validation, rate limiting, that the server's data file contains no readable names, labels, amounts, key or token, the PIN lock (right PIN, wrong PIN, tampering), the new-key move (old key locked out, new key sees the same numbers, failures leave the old budget intact, a lost reply to the delete), the QR structure, the setup help text, that every file the app needs is in the offline cache list, and a 150-edit offline backlog draining through the server's rate limit.
+- **Verified (automated, `npm test`, 27 checks):** the real server and real client code: live sync, concurrent edits, offline queue, server restart, full server wipe and recovery, delete-all, wrong-key rejection, input validation, rate limiting, that the server's data file contains no readable names, labels, amounts, key or token, the PIN lock (right PIN, wrong PIN, tampering), the new-key move (old key locked out, new key sees the same numbers, failures leave the old budget intact, a lost reply to the delete), the QR structure, the setup help text, that every file the app needs is in the offline cache list, a 150-edit offline backlog draining through the server's rate limit, and the connect-only-when-needed mode (no open connection, syncs on open, save and wake-up).
 - **Verified (headless Chrome at phone size, two separate "phones"):** guided setup, the "I'm asking for" help and (i) button, invite link, live edits both ways, quick add and subtract, the QR code on screen (decoded by a software scanner back to the exact invite link; separately, 450 realistic invite-link QR codes were run through two independent scanners, which read 450 and 449 of them, and the one miss read fine at another image size), PIN lock (set, restart, wrong and right PIN, lock after two minutes away, wait after five wrong tries, turn off), the new-key flow with a second phone being signed out and rejoining, reload, month change, dark mode, extra-large text, and a layout sweep for sideways overflow on every screen and box.
+- **Not re-run since the app was switched to connect-only-when-needed:** the headless Chrome checks above (they were run with live updates on).
 - **Not verified:** a real Android device, installing it as an app, the offline service worker across a cold start, real camera scanning of the QR code (it decodes with a software scanner), and any hosted deployment (Render, Cloudflare, Docker).
 
 ## Known limits
@@ -94,7 +96,7 @@ public/style.css      warm theme, large touch targets, dark mode
 public/app.js         UI, guided setup, quick add, lock, new-key flow
 public/model.js       budget state, money math, setup help text (no DOM)
 public/vault.js       key derivation and AES-GCM encryption
-public/sync.js        real-time sync, offline queue, reconnect, server-wipe recovery
+public/sync.js        sync (on demand or live), offline queue, reconnect, server-wipe recovery
 public/lock.js        PIN lock: wraps the family key with a PIN-derived key
 public/rotate.js      "make a new key": moves the budget to a new room, then deletes the old one
 public/qr.js          QR code generator (no libraries)
