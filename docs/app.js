@@ -46,6 +46,29 @@ function busy(msg) {
   el.hidden = !msg;
 }
 
+/**
+ * The "I'm asking for" line and the longer explanation that goes with it.
+ * With `always` the explanation is simply shown; otherwise an (i) button opens and closes it.
+ */
+function makeHelp(info, { always = false, id }) {
+  const panel = h('div', { class: 'help', id, hidden: !always }, h('p', { text: info.what }), h('p', { class: 'help-note', text: info.note }));
+  let btn = null;
+  if (!always) {
+    btn = h('button', { class: 'info-btn', type: 'button', text: 'i', title: info.what, 'aria-controls': id, 'aria-expanded': 'false', 'aria-label': `More about this question. ${info.ask}` });
+    btn.addEventListener('click', () => {
+      panel.hidden = !panel.hidden;
+      btn.setAttribute('aria-expanded', String(!panel.hidden));
+    });
+  }
+  const badge = h(
+    'div',
+    { class: 'ask' },
+    h('div', { class: 'ask-main' }, h('span', { class: 'ask-label', text: "I'm asking for" }), h('span', { class: 'ask-text', text: info.ask }), h('span', { class: 'ask-stage', text: info.stage })),
+    btn,
+  );
+  return { badge, panel };
+}
+
 function show(name) {
   for (const id of ['insecure', 'welcome', 'lock', 'budget']) $(`#${id}`).hidden = id !== name;
 }
@@ -111,8 +134,11 @@ async function enter(key, creator) {
   show('budget');
   render();
   if (creator) {
+    store.set('fb.setup', 'todo'); // first-time setup: stays 'todo' until its last screen is reached
     await seedDefaults();
     openWizard(true);
+  } else if (setupPending()) {
+    openWizard(false); // the app was closed part-way through first-time setup: carry on where it stopped
   }
 }
 
@@ -193,6 +219,8 @@ function makeRow(id, kind) {
   const caps = kind === 'i' ? { p: 'Expected', a: 'Received' } : { p: 'Planned', a: 'Spent' };
   row.name = h('button', { class: 'item-name', type: 'button', onclick: () => openCategoryDialog(id, kind) });
   row.status = h('span', { class: 'item-status' });
+  row.help = h('div', { class: 'help', id: `help-${id}`, hidden: true });
+  row.info = h('button', { class: 'info-btn sm', type: 'button', text: 'i', 'aria-controls': `help-${id}`, 'aria-expanded': 'false', onclick: () => toggleRowHelp(row) });
   const mk = (field) => {
     const input = h('input', { class: 'amt', type: 'text', inputMode: 'decimal', autocomplete: 'off', enterKeyHint: 'done', placeholder: '0' });
     const cur = h('span', { class: 'cur', 'aria-hidden': 'true' });
@@ -204,7 +232,8 @@ function makeRow(id, kind) {
   row.el = h(
     'article',
     { class: 'item' },
-    h('div', { class: 'item-head' }, row.name, row.status),
+    h('div', { class: 'item-head' }, row.name, row.info, row.status),
+    row.help,
     h('div', { class: 'pair' }, mk('p'), mk('a')),
     (row.quick = h('button', { class: 'quick', type: 'button', text: kind === 'i' ? '+ Add money received' : '+ Add spending', onclick: () => openAdd(id, kind) })),
     kind === 'e' ? (row.bar = h('div', { class: 'bar' }, h('i'))) : null,
@@ -212,9 +241,33 @@ function makeRow(id, kind) {
   return row;
 }
 
+/** The (i) on an item card: what belongs in this item, and what its two boxes mean. */
+function toggleRowHelp(row) {
+  const c = budget.cats.get(row.id);
+  if (!c) return;
+  if (row.help.hidden) {
+    const info = helpFor(c.name, c.kind, 'p');
+    row.help.replaceChildren(
+      h('p', {}, h('b', { text: info.ask })),
+      h('p', { text: info.what }),
+      h('p', {
+        class: 'help-note',
+        text: c.kind === 'i'
+          ? '"Expected" is your estimate for the month. "Received" is what has actually come in so far.'
+          : '"Planned" is your estimate for the month. "Spent" is what has actually gone out so far.',
+      }),
+    );
+  }
+  row.help.hidden = !row.help.hidden;
+  row.info.setAttribute('aria-expanded', String(!row.help.hidden));
+}
+
 function updateRow(row, cat) {
   if (row.nameText !== cat.name) {
     row.nameText = cat.name;
+    row.help.hidden = true;
+    row.info.setAttribute('aria-expanded', 'false');
+    row.info.setAttribute('aria-label', `What goes in ${cat.name}?`);
     row.name.replaceChildren(h('span', { class: 'name-text', text: cat.name }), h('span', { class: 'edit-hint', text: 'Edit' }));
     row.pIn.setAttribute('aria-label', `${cat.name}, ${row.kind === 'i' ? 'expected' : 'planned'}`);
     row.aIn.setAttribute('aria-label', `${cat.name}, ${row.kind === 'i' ? 'received' : 'spent'}`);
@@ -312,12 +365,11 @@ function copyPlanned() {
 }
 
 /* ------------------------------------------------------------------ guided setup (one value at a time) */
-const wiz = { steps: [], step: 0, month: '', helpShown: false };
+const wiz = { steps: [], step: 0, month: '' };
 
 function openWizard(fresh) {
   const cats = [...budget.categories('i'), ...budget.categories('e')];
   wiz.month = month;
-  wiz.helpShown = false; // the first question opens its explanation by itself, so people notice the (i) button
   wiz.steps = [
     { type: 'intro' },
     ...cats.map((c) => ({ type: 'val', id: c.id, field: 'p' })),
@@ -326,6 +378,11 @@ function openWizard(fresh) {
     { type: 'done' },
   ];
   wiz.step = fresh ? 0 : 1;
+  if (!fresh && setupPending()) {
+    // Carrying on with first-time setup: go to the first question that has no answer yet.
+    const i = wiz.steps.findIndex((x) => x.type === 'val' && budget.get(x.id, wiz.month, 'p') === null);
+    wiz.step = i >= 0 ? i : wiz.steps.findIndex((x) => x.type === 'extra');
+  }
   $('#wizard').hidden = false;
   document.body.classList.add('no-scroll');
   renderWizard();
@@ -359,10 +416,12 @@ function wizIntro() {
       { class: 'wiz-stack' },
       h('p', { class: 'eyebrow', text: 'Welcome' }),
       h('h2', { class: 'wiz-title', text: `Let's set up ${APP_NAME}` }),
-      h('p', { class: 'wiz-lead', text: "We'll ask about each item one at a time: first what comes in, then what goes out. You can change anything later." }),
-      gamesOn()
-        ? h('p', { class: 'help', text: 'Every answer earns a quick puzzle: a mini sudoku, a word scramble or a mini crossword. You can skip any of them, or turn them off in the menu.' })
-        : null,
+      h('p', { class: 'wiz-lead', text: "We'll ask for one number at a time: first each income, then each bill. Every question says exactly what it is asking for." }),
+      setupPending()
+        ? h('p', { class: 'help', text: 'Every answer unlocks a quick puzzle: a mini sudoku, a word scramble or a mini crossword. Solve it to move on to the next question. Stuck? Ask for a hint, or swap it for a different puzzle.' })
+        : gamesOn()
+          ? h('p', { class: 'help', text: 'Every answer earns a quick puzzle. You can skip any of them, or turn them off in the menu.' })
+          : null,
       h('button', { class: 'btn btn-primary btn-xl', type: 'button', text: "Let's go", onclick: () => go(1) }),
     ),
   };
@@ -388,25 +447,8 @@ function wizValue(s) {
   });
   const err = h('p', { class: 'notice error', role: 'alert', hidden: true });
 
-  // "What am I being asked for?" Always visible, with an (i) button (hover on a computer, tap on a phone) for more.
-  const info = helpFor(cat.name, cat.kind, s.field);
-  const startOpen = !wiz.helpShown;
-  wiz.helpShown = true;
-  const panel = h('div', { class: 'help', id: 'wiz-help', hidden: !startOpen }, h('p', { text: info.what }), h('p', { class: 'help-note', text: info.note }));
-  const infoBtn = h('button', {
-    class: 'info-btn', type: 'button', text: 'i', title: info.what,
-    'aria-controls': 'wiz-help', 'aria-expanded': String(startOpen), 'aria-label': `More about this question. ${info.ask}`,
-  });
-  infoBtn.addEventListener('click', () => {
-    panel.hidden = !panel.hidden;
-    infoBtn.setAttribute('aria-expanded', String(!panel.hidden));
-  });
-  const askBadge = h(
-    'div',
-    { class: 'ask' },
-    h('div', { class: 'ask-main' }, h('span', { class: 'ask-label', text: "I'm asking for" }), h('span', { class: 'ask-text', text: info.ask }), h('span', { class: 'ask-stage', text: info.stage })),
-    infoBtn,
-  );
+  // "What am I being asked for?" The explanation is always on the screen during setup.
+  const { badge: askBadge, panel } = makeHelp(helpFor(cat.name, cat.kind, s.field), { always: true, id: 'wiz-help' });
 
   const save = () => {
     const r = parseMoney(input.value);
@@ -431,28 +473,36 @@ function wizValue(s) {
       next();
     }
   });
+  // "We don't have this one": take the item out of the budget and out of the rest of setup.
+  const remove = async () => {
+    await putRecord(cat.id, catPayload(cat.name, cat.kind, cat.order, true));
+    wiz.steps = wiz.steps.filter((x) => x.id !== cat.id);
+    wiz.step = Math.min(wiz.step, wiz.steps.length - 1);
+    renderWizard();
+  };
   return {
-    // On the first question the explanation opens by itself, so leave the keyboard down until they have had a chance to read it.
-    focus: startOpen ? null : input,
+    // The keyboard stays down until they tap the box, so the explanation is not pushed off the screen.
+    focus: null,
     el: h(
       'div',
       { class: 'wiz-stack' },
       h('p', { class: 'eyebrow', text: `${isIncome ? 'Money in' : 'Money out'} · ${isPlan ? 'Plan' : 'So far'}` }),
       h('h2', { class: 'wiz-title', text: question }),
       askBadge,
+      panel,
       h('label', { class: 'wiz-money' }, h('span', { class: 'cur', text: currencySymbol() }), input),
       prev !== null
         ? h('button', { class: 'chip', type: 'button', text: `Same as last month (${fmt(prev)})`, onclick: () => { input.value = centsToInput(prev); input.focus(); } })
         : null,
-      panel,
       err,
       h('button', { class: 'btn btn-primary btn-xl', type: 'button', text: 'Next', onclick: next }),
       h(
         'div',
         { class: 'wiz-actions' },
         h('button', { class: 'btn btn-ghost', type: 'button', text: 'Back', onclick: () => go(-1) }),
-        h('button', { class: 'btn btn-ghost', type: 'button', text: 'Skip', onclick: () => go(1) }),
+        h('button', { class: 'btn btn-ghost', type: 'button', text: 'Skip for now', onclick: () => go(1) }),
       ),
+      isPlan ? h('button', { class: 'link', type: 'button', text: "We don't have this one. Remove it.", onclick: remove }) : null,
     ),
   };
 }
@@ -537,6 +587,7 @@ function wizDone() {
     outR.b.textContent = fmt(t.expenseP);
     leftR.b.textContent = fmt(t.incomeP - t.expenseP);
   });
+  if (setupPending()) store.set('fb.setup', 'done'); // from here on, puzzles are never required
   const solved = Number(store.get('fb.solved')) || 0;
   const buttons = [
     h('button', { class: 'btn btn-primary btn-xl', type: 'button', text: 'Open my budget', onclick: closeWizard }),
@@ -549,7 +600,7 @@ function wizDone() {
       h('p', { class: 'eyebrow', text: 'All set' }),
       h('h2', { class: 'wiz-title', text: `${monthLabel(wiz.month)} is ready` }),
       h('div', { class: 'summary-box' }, inR.el, outR.el, leftR.el),
-      solved > 0 && gamesOn() ? h('p', { class: 'wiz-lead', text: `Puzzles solved so far: ${solved}` }) : null,
+      solved > 0 ? h('p', { class: 'wiz-lead', text: `Puzzles solved so far: ${solved}` }) : null,
       ...buttons,
       h('button', { class: 'btn btn-ghost', type: 'button', text: 'Back', onclick: () => go(-1) }),
     ),
@@ -1068,13 +1119,24 @@ function countSolved() {
   return total;
 }
 
-/** During guided setup: show a puzzle as the reward for an answer, then carry on. */
+/** True until first-time setup has been finished on this phone. Until then every answer is followed by a puzzle. */
+const setupPending = () => store.get('fb.setup') === 'todo';
+
+/**
+ * During guided setup: a puzzle after an answer, then carry on.
+ * First-time setup: the puzzle has to be solved (hints and "a different puzzle" keep anyone from getting stuck).
+ * Any later guided setup: it can be skipped, and the menu switch turns the puzzles off.
+ */
 function reward(praise, then) {
-  if (!gamesOn()) return then();
+  const required = setupPending();
+  if (!required && !gamesOn()) return then();
   $('#wiz-step').textContent = 'Puzzle break';
-  mountGame($('#wiz-body'), { ...nextGame(), praise, onSolved: countSolved, onDone: then });
-  window.scrollTo(0, 0);
-  $('#wizard').scrollTop = 0;
+  const mount = () => {
+    mountGame($('#wiz-body'), { ...nextGame(), praise, required, onSolved: countSolved, onSwap: mount, onDone: then });
+    window.scrollTo(0, 0);
+    $('#wizard').scrollTop = 0;
+  };
+  mount();
 }
 
 /** From the menu: puzzles just for fun. */
@@ -1134,6 +1196,7 @@ function wire() {
   fromMenu('#m-setup', () => openWizard(false));
   fromMenu('#m-copyplan', copyPlanned);
   fromMenu('#m-game', playPuzzle);
+  $('#btn-play').addEventListener('click', playPuzzle);
   fromMenu('#m-lock', toggleLock);
   fromMenu('#m-sharepw', changeSharingPassword);
   $('#m-currency').addEventListener('change', (e) => {

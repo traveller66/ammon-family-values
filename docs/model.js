@@ -6,9 +6,10 @@
 
 export const APP_NAME = 'Ammon Family Values';
 
+// One small question each during guided setup: every income and every bill is its own item.
 export const DEFAULT_CATEGORIES = {
-  i: ['Paycheck', 'Other income'],
-  e: ['Housing', 'Utilities', 'Groceries', 'Transportation', 'Insurance', 'Dining out', 'Fun', 'Savings', 'Other'],
+  i: ['Paycheck 1', 'Paycheck 2', 'Other income'],
+  e: ['Rent or mortgage', 'Electricity', 'Water and gas', 'Phone and internet', 'Groceries', 'Car payment', 'Gas and car care', 'Insurance', 'Dining out', 'Fun', 'Savings', 'Other'],
 };
 
 const HEX32 = /^[a-f0-9]{32}$/;
@@ -68,6 +69,38 @@ export function centsToInput(cents) {
  * `what` is the longer explanation behind the (i) button.
  */
 export const HELP = {
+  'paycheck 1': {
+    ask: 'Net income: the first paycheck, after taxes',
+    what: 'The take-home pay from one job for the whole month. That is the money that actually lands in the bank after taxes and deductions, not the bigger "gross" amount before taxes. Paid every two weeks? Add the month\'s paychecks together. If it changes from month to month, use a typical month.',
+  },
+  'paycheck 2': {
+    ask: 'Net income: a second paycheck, after taxes',
+    what: 'The take-home pay from a second job or a second person, for the whole month. Use the amount after taxes (net), not the gross amount before taxes. Only one paycheck in the family? Tap "We don\'t have this one".',
+  },
+  'rent or mortgage': {
+    ask: 'Your monthly rent or mortgage payment',
+    what: 'Just the rent or the mortgage payment itself. If property tax and home insurance are bundled into your mortgage payment, that is fine, leave them in. Electricity, water and the other bills each get their own question next.',
+  },
+  electricity: {
+    ask: 'Your monthly electric bill',
+    what: 'The electric bill for a typical month. If it swings a lot between summer and winter, use an average.',
+  },
+  'water and gas': {
+    ask: 'Water, sewer, trash and natural gas bills',
+    what: 'Add together the water, sewer, trash and natural gas bills for a typical month. If a bill comes every two or three months, divide it to get one month.',
+  },
+  'phone and internet': {
+    ask: 'Cell phone and home internet bills',
+    what: 'Every cell phone plan in the family plus home internet, added together for one month. Streaming services belong under "Fun".',
+  },
+  'car payment': {
+    ask: 'Your monthly car loan or lease payments',
+    what: 'The loan or lease payment for each vehicle, added together. Fuel and repairs are the next question, and car insurance goes under "Insurance".',
+  },
+  'gas and car care': {
+    ask: 'Fuel, repairs, parking, tolls and fares',
+    what: 'What it costs to get around apart from the car payment: fuel, oil changes, repairs, parking, tolls, and bus or rideshare fares. A rough monthly average is fine.',
+  },
   paycheck: {
     ask: 'Net income: your take-home pay after taxes',
     what: 'This is the money that actually lands in your bank account after taxes and deductions, not the bigger "gross" amount before taxes. If more than one person gets paid, add all the paychecks together. If your pay changes from month to month, use a typical month.',

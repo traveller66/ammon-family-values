@@ -23,10 +23,13 @@ const NAMES = { sudoku: 'Mini sudoku', scramble: 'Word scramble', crossword: 'Mi
  *   kind      'sudoku' | 'scramble' | 'crossword'
  *   n         a counter used to pick which word list entry comes up, so puzzles do not repeat back to back
  *   praise    a line shown above the puzzle ("Groceries is planned.")
+ *   required  true during first-time setup: there is no skip, the puzzle has to be solved to move on.
+ *             Nobody gets stuck: "Give me a hint" fills in one square, and `onSwap` offers a different puzzle.
  *   onSolved  called once when the puzzle is solved; may return the running total of solved puzzles
- *   onDone    called when the person moves on (after solving, or by skipping)
+ *   onSwap    if given, a "Try a different puzzle" button calls it
+ *   onDone    called when the person moves on (after solving, or by skipping when that is allowed)
  */
-export function mountGame(host, { kind, n = 0, praise = '', doneLabel = 'Keep going', skipLabel = 'Skip this puzzle', onSolved = () => null, onDone }) {
+export function mountGame(host, { kind, n = 0, praise = '', required = false, doneLabel = 'Keep going', skipLabel = 'Skip this puzzle', onSolved = () => null, onSwap = null, onDone }) {
   if (!GAME_KINDS.includes(kind)) kind = GAME_KINDS[0];
   const status = h('p', { class: 'game-status', role: 'status', 'aria-live': 'polite' });
   const board = h('div', { class: 'game-board' });
@@ -35,9 +38,9 @@ export function mountGame(host, { kind, n = 0, praise = '', doneLabel = 'Keep go
     { class: 'wiz-stack game', 'data-game': kind },
     h('p', { class: 'eyebrow', text: `Puzzle break · ${NAMES[kind]}` }),
     praise ? h('h2', { class: 'wiz-title game-praise', text: praise }) : null,
+    required ? h('p', { class: 'game-must', text: 'Solve this one to move on.' }) : null,
     board,
     status,
-    h('button', { class: 'btn btn-ghost game-skip', type: 'button', text: skipLabel, onclick: () => onDone(false) }),
   );
   let finished = false;
   const win = () => {
@@ -48,7 +51,7 @@ export function mountGame(host, { kind, n = 0, praise = '', doneLabel = 'Keep go
     wrap.classList.add('won');
     status.textContent = '';
     for (const b of board.querySelectorAll('button')) b.disabled = true;
-    wrap.querySelector('.game-skip').remove();
+    wrap.querySelector('.game-help')?.remove();
     const go = h('button', { class: 'btn btn-primary btn-xl game-next', type: 'button', text: doneLabel, onclick: () => onDone(true) });
     wrap.append(
       h('div', { class: 'game-win' }, h('b', { text: cheer }), Number.isInteger(total) ? h('span', { text: `Puzzles solved: ${total}` }) : null),
@@ -59,13 +62,24 @@ export function mountGame(host, { kind, n = 0, praise = '', doneLabel = 'Keep go
   const say = (msg) => {
     status.textContent = msg;
   };
-  ({ sudoku, scramble, crossword })[kind](board, { n, win, say });
+  const hint = ({ sudoku, scramble, crossword })[kind](board, { n, win, say });
+  wrap.append(
+    h(
+      'div',
+      { class: 'game-help' },
+      h('button', { class: 'chip game-hint', type: 'button', text: 'Give me a hint', onclick: () => { if (!finished) hint(); } }),
+      onSwap ? h('button', { class: 'chip game-swap', type: 'button', text: 'Try a different puzzle', onclick: () => onSwap() }) : null,
+      required ? null : h('button', { class: 'btn btn-ghost game-skip', type: 'button', text: skipLabel, onclick: () => onDone(false) }),
+    ),
+  );
   host.replaceChildren(wrap);
 }
 
+// Each puzzle below draws itself into `board` and returns its hint: a function that puts one right answer in place.
+
 /* ------------------------------------------------------------------ mini sudoku */
 function sudoku(board, { win, say }) {
-  const { puzzle } = makeSudoku();
+  const { puzzle, solution } = makeSudoku();
   const grid = puzzle.map((row) => [...row]);
   const cells = [];
   let sel = null;
@@ -116,6 +130,14 @@ function sudoku(board, { win, say }) {
   board.append(h('p', { class: 'game-how', text: 'Fill the empty squares so every row, every column and every block of four has 1, 2, 3 and 4.' }), gridEl, keys);
   sel = cells.find((x) => !x.given) ?? null;
   paint();
+  return () => {
+    const wrong = (x) => !x.given && grid[x.r][x.c] !== solution[x.r][x.c];
+    const target = sel && wrong(sel) ? sel : cells.find(wrong);
+    if (!target) return;
+    grid[target.r][target.c] = solution[target.r][target.c];
+    sel = cells.find(wrong) ?? target;
+    paint();
+  };
 }
 
 /* ------------------------------------------------------------------ word scramble */
@@ -172,6 +194,14 @@ function scramble(board, { n, win, say }) {
     clear,
   );
   paint();
+  return () => {
+    let k = 0; // how many letters from the start are already right
+    while (k < word.length && slots[k] !== null && tiles[slots[k]] === word[k]) k++;
+    if (k >= word.length) return;
+    for (let i = k; i < word.length; i++) slots[i] = null;
+    slots[k] = tiles.findIndex((letter, t) => letter === word[k] && !slots.includes(t));
+    paint();
+  };
 }
 
 /* ------------------------------------------------------------------ mini crossword */
@@ -233,4 +263,12 @@ function crossword(board, { n, win, say }) {
   const clues = h('ul', { class: 'clues' }, x.clues.map((c) => h('li', {}, h('b', { text: `${c.num} ${c.dir}` }), h('span', { text: ` ${c.clue} (${c.word.length} letters)` }))));
   board.append(h('p', { class: 'game-how', text: 'Tap a square, then tap a letter.' }), gridEl, clues, keys);
   paint();
+  return () => {
+    const wrong = (k) => typed.get(k) !== x.cells.get(k);
+    const target = wrong(sel) ? sel : order.find(wrong);
+    if (!target) return;
+    typed.set(target, x.cells.get(target));
+    sel = order.find(wrong) ?? target;
+    paint();
+  };
 }

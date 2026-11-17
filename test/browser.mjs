@@ -95,6 +95,11 @@ async function solveGame(p) {
   return kind;
 }
 
+async function hintThrough(p) {
+  for (let i = 0; i < 40 && !(await p.page.locator('.game-win').count()); i++) await p.page.locator('.game-hint').click();
+  await p.page.locator('.game-win').waitFor();
+}
+
 async function answer(p, amount) {
   await p.page.locator('#wiz-body .wiz-input').fill(String(amount));
   await p.page.locator('#wiz-body button', { hasText: /^Next$/ }).click();
@@ -136,59 +141,110 @@ try {
   await shot(A, '01-welcome');
   await A.page.click('#btn-new');
   await A.page.locator('#wizard:not([hidden])').waitFor();
-  assert.match(await A.page.textContent('#wiz-body'), /quick puzzle/);
+  assert.match(await A.page.textContent('#wiz-body'), /Solve it to move on/);
   await shot(A, '02-setup-intro');
   await A.page.click('text=Let\'s go');
   ok('welcome screen and guided setup open');
 
+  // The explanation is on the screen for every question, with nothing to press.
+  assert.ok(await A.page.locator('#wiz-body .ask').isVisible());
+  assert.match(await A.page.textContent('#wiz-body .ask'), /Net income: the first paycheck, after taxes/);
+  assert.match(await A.page.textContent('#wiz-body .help'), /not the bigger "gross" amount/);
+  assert.equal(await A.page.locator('#wiz-body .info-btn').count(), 0);
+  await noOverflow(A, 'first question');
+  await shot(A, '02-first-question');
+
+  // One small question at a time. Every answer must be followed by a solved puzzle.
+  const plan = { 'Paycheck 1': 4000, 'Other income': 250, 'Rent or mortgage': 1500, Groceries: 600, 'Dining out': 300 };
+  const asked = [];
   const kinds = [];
-  const amounts = [4000, 250, 1500];
-  for (let i = 0; i < 3; i++) {
-    await answer(A, amounts[i]);
+  for (let i = 0; i < 40 && (await A.page.locator('#wiz-body .wiz-input').count()); i++) {
+    const title = await A.page.textContent('#wiz-body .wiz-title');
+    const name = title.match(/“(.+)”/)[1];
+    asked.push(name);
+    assert.ok(await A.page.locator('#wiz-body .help').isVisible(), `no explanation showing for ${name}`);
+    const moved = () => A.page.waitForFunction((t) => document.querySelector('#wiz-body .wiz-title')?.textContent !== t, title);
+    if (name === 'Paycheck 2') {
+      await A.page.locator('#wiz-body button', { hasText: "We don't have this one" }).click();
+      await moved();
+      continue;
+    }
+    if (!(name in plan)) {
+      await A.page.locator('#wiz-body button', { hasText: /^Skip for now$/ }).click();
+      await moved();
+      assert.equal(await A.page.locator('#wiz-body .game').count(), 0); // no answer, no puzzle
+      continue;
+    }
+    await answer(A, plan[name]);
     await A.page.locator('#wiz-body .game').waitFor();
     assert.equal(await A.page.textContent('#wiz-step'), 'Puzzle break');
-    await noOverflow(A, `game ${i}`);
-    await shot(A, `03-game-${i}-start`);
-    kinds.push(await solveGame(A));
-    await noOverflow(A, `game ${i} solved`);
-    await A.page.waitForTimeout(450);
-    await shot(A, `03-game-${i}-solved`);
-    assert.match(await A.page.textContent('.game-win'), new RegExp(`Puzzles solved: ${i + 1}`));
+    assert.equal(await A.page.locator('#wiz-body .game-skip').count(), 0, 'first-time setup must not offer a skip');
+    assert.match(await A.page.textContent('#wiz-body .game-must'), /Solve this one to move on/);
+    assert.equal(await A.page.locator('#wiz-body .wiz-input').count(), 0); // the next question is not reachable yet
+    await noOverflow(A, `game ${kinds.length}`);
+    if (kinds.length < 3) {
+      await shot(A, `03-game-${kinds.length}-start`);
+      kinds.push(await solveGame(A)); // solved by tapping, the way a person would
+      await A.page.waitForTimeout(450);
+      await shot(A, `03-game-${kinds.length - 1}-solved`);
+    } else if (kinds.length === 3) {
+      const before = await A.page.locator('#wiz-body .game').getAttribute('data-game');
+      await A.page.click('.game-swap'); // stuck? a different puzzle, but still a puzzle
+      assert.notEqual(await A.page.locator('#wiz-body .game').getAttribute('data-game'), before);
+      assert.equal(await A.page.locator('#wiz-body .game-skip').count(), 0);
+      await hintThrough(A);
+      kinds.push('swapped');
+    } else {
+      await hintThrough(A); // hints alone can finish any puzzle, so nobody is locked out
+      kinds.push('hints');
+    }
+    assert.match(await A.page.textContent('.game-win'), new RegExp(`Puzzles solved: ${kinds.length}`));
+    await noOverflow(A, `game ${kinds.length} solved`);
     await A.page.click('.game-next');
-    await A.page.locator('#wiz-body .wiz-input').waitFor();
+    await A.page.locator('#wiz-body .game').waitFor({ state: 'detached' });
   }
-  assert.deepEqual(kinds, ['sudoku', 'scramble', 'crossword']);
-  ok('each answered question is followed by a puzzle: sudoku, word scramble, crossword, all solvable by tapping');
+  assert.deepEqual(kinds, ['sudoku', 'scramble', 'crossword', 'swapped', 'hints']);
+  assert.deepEqual(asked.slice(0, 5), ['Paycheck 1', 'Paycheck 2', 'Other income', 'Rent or mortgage', 'Electricity']);
+  assert.equal(asked.length, 15);
+  ok('first-time setup: one small question at a time, the explanation always showing, and a puzzle that must be solved after every answer');
+  ok('a question left blank has no puzzle; hints and "a different puzzle" get anyone unstuck without a skip');
 
-  // skipping a question gives no puzzle; answering then skipping the puzzle moves on
-  const q4 = await A.page.textContent('#wiz-body .wiz-title');
-  await A.page.locator('#wiz-body button', { hasText: /^Skip$/ }).click();
-  assert.equal(await A.page.locator('#wiz-body .game').count(), 0);
-  assert.notEqual(await A.page.textContent('#wiz-body .wiz-title'), q4);
-  await answer(A, 600); // Groceries
-  await A.page.locator('#wiz-body .game').waitFor();
-  await A.page.click('.game-skip');
-  await A.page.locator('#wiz-body .wiz-input').waitFor();
-  ok('a skipped question has no puzzle, and a puzzle can be skipped');
-
-  // puzzles off: straight to the next question
-  await A.page.evaluate(() => localStorage.setItem('fb.games', 'off'));
-  await answer(A, 300);
-  await A.page.waitForTimeout(100);
-  assert.equal(await A.page.locator('#wiz-body .game').count(), 0);
-  await A.page.evaluate(() => localStorage.setItem('fb.games', 'on'));
-  ok('with puzzles turned off, setup goes straight on');
-
-  for (let i = 0; i < 30 && (await A.page.locator('#wiz-body .wiz-input').count()); i++) await A.page.locator('#wiz-body button', { hasText: /^Skip$/ }).click();
   await A.page.click("text=No, that's everything");
   await A.page.click('text=Not now');
-  assert.match(await A.page.textContent('#wiz-body'), /Puzzles solved so far: 3/);
+  assert.match(await A.page.textContent('#wiz-body'), /Puzzles solved so far: 5/);
   await noOverflow(A, 'setup done');
   await shot(A, '04-setup-done');
   await A.page.click('text=Open my budget');
   await A.page.locator('#budget:not([hidden])').waitFor();
   assert.match(await A.page.textContent('#status-text'), /only on this phone/);
   await noOverflow(A, 'budget');
+  assert.equal(await A.page.locator('.name-text', { hasText: /^Paycheck 2$/ }).count(), 0); // "We don't have this one" removed it
+  const card = A.page.locator('.item', { has: A.page.locator('.name-text', { hasText: /^Paycheck 1$/ }) });
+  assert.equal(await card.locator('.help').isVisible(), false);
+  await card.locator('.info-btn').click();
+  assert.match(await card.locator('.help').textContent(), /Net income: the first paycheck, after taxes.*not the bigger "gross" amount.*"Expected" is your estimate/s);
+  await noOverflow(A, 'item help');
+  await shot(A, '05-item-help');
+  await card.locator('.info-btn').click();
+  ok('every item on the main screen has an (i) that explains what goes in it');
+
+  // Setup run again later: puzzles are offered but never required.
+  await A.page.click('#btn-menu');
+  await A.page.click('#m-setup');
+  assert.ok(await A.page.locator('#wiz-body .help').isVisible());
+  await answer(A, 4100);
+  await A.page.locator('#wiz-body .game').waitFor();
+  assert.equal(await A.page.locator('#wiz-body .game-must').count(), 0);
+  await A.page.click('.game-skip');
+  await A.page.locator('#wiz-body .wiz-input').waitFor();
+  await A.page.evaluate(() => localStorage.setItem('fb.games', 'off'));
+  await answer(A, 260);
+  await A.page.waitForTimeout(100);
+  assert.equal(await A.page.locator('#wiz-body .game').count(), 0);
+  await A.page.evaluate(() => localStorage.setItem('fb.games', 'on'));
+  await A.page.click('#wiz-exit');
+  ok('after first-time setup, puzzles can be skipped or turned off');
+
   await addSpending(A, 'Groceries', '82.50');
   assert.equal(await spent(A, 'Groceries'), '82.50');
   await shot(A, '05-budget');
@@ -236,8 +292,8 @@ try {
 
   /* ---------------- B updates and sends back; A also changed something ---------------- */
   await addSpending(B, 'Groceries', '30');
-  await B.page.locator('.item', { has: B.page.locator('.name-text', { hasText: /^Utilities$/ }) }).locator('input.amt').nth(1).fill('140');
-  await B.page.locator('.item', { has: B.page.locator('.name-text', { hasText: /^Utilities$/ }) }).locator('input.amt').nth(1).blur();
+  await B.page.locator('.item', { has: B.page.locator('.name-text', { hasText: /^Electricity$/ }) }).locator('input.amt').nth(1).fill('140');
+  await B.page.locator('.item', { has: B.page.locator('.name-text', { hasText: /^Electricity$/ }) }).locator('input.amt').nth(1).blur();
   await B.page.locator('.add-btn[data-kind="e"]').click();
   await B.page.fill('#cat-name', 'Pet care');
   await B.page.click('#cat-form button[type=submit]');
@@ -262,7 +318,7 @@ try {
   assert.match(preview, /Groceries · Spent/);
   assert.match(preview, /\$102\.50 → \$117\.50/);
   assert.match(preview, /You changed this too/);
-  assert.match(preview, /Utilities · Spent/);
+  assert.match(preview, /Electricity · Spent/);
   assert.ok(!/Dining out/.test(preview));
   assert.equal(await spent(A, 'Groceries'), '102.50'); // nothing applied yet
   await noOverflow(A, 'preview');
@@ -278,7 +334,7 @@ try {
   await A.page.click('#pv-go');
   await A.page.waitForTimeout(400);
   assert.equal(await spent(A, 'Groceries'), '117.50');
-  assert.equal(await spent(A, 'Utilities'), '140');
+  assert.equal(await spent(A, 'Electricity'), '140');
   assert.equal(await spent(A, 'Dining out'), '25');
   assert.equal(await A.page.locator('.name-text', { hasText: /^Pet care$/ }).count(), 1);
   await A.page.reload();
@@ -294,17 +350,23 @@ try {
   ok('bringing in an update shows a preview first (with the both-changed warning), Cancel changes nothing, Update applies it, and it sticks');
 
   /* ---------------- puzzles from the menu ---------------- */
-  await A.page.click('#btn-menu');
-  await A.page.click('#m-game');
+  await A.page.click('#btn-play');
   await A.page.locator('#dlg-game[open] .game').waitFor();
+  assert.equal(await A.page.locator('#dlg-game .game-must').count(), 0);
   const k1 = await solveGame(A);
   await shot(A, '10-menu-puzzle');
   await A.page.click('.game-next');
   await A.page.locator('#dlg-game[open] .game:not(.won)').waitFor();
   await solveGame(A);
   await A.page.click('#game-close');
+  await A.page.click('#btn-menu');
+  await A.page.click('#m-game');
+  await A.page.locator('#dlg-game[open] .game').waitFor();
+  await A.page.click('.game-skip'); // "Try a different puzzle"
+  await hintThrough(A);
+  await A.page.click('#game-close');
   assert.ok(k1);
-  ok('"Play a puzzle" in the menu works');
+  ok('"Play a puzzle" works from the main screen and the menu, with nothing required');
 
   /* ---------------- PIN lock, then offline ---------------- */
   await A.page.click('#btn-menu');
@@ -349,6 +411,15 @@ try {
     await D.page.click('.game-next');
   }
   ok('puzzles fit a small phone with extra-large text, in dark mode');
+  await noOverflow(D, 'dark xl question');
+  await shot(D, '12-dark-xl-question');
+  await D.page.reload();
+  await D.page.locator('#wizard:not([hidden])').waitFor();
+  assert.match(await D.page.textContent('#wiz-body .wiz-title'), /Rent or mortgage/);
+  await answer(D, 900);
+  await D.page.locator('#wiz-body .game').waitFor();
+  assert.equal(await D.page.locator('#wiz-body .game-skip').count(), 0);
+  ok('closing the app part-way through first-time setup picks up at the next unanswered question, puzzles still required');
 
   /* ---------------- nothing left the phone ---------------- */
   const bad = requests.filter((r) => !r.url.startsWith(URL0) && !r.url.startsWith('blob:') || r.method !== 'GET');

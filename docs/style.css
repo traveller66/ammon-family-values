@@ -177,18 +177,18 @@ button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .progress i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 999px; transition: width 0.3s ease; }
 .wizard-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 0.3rem; font-size: 0.95rem; }
 .wizard-card { max-width: 520px; margin: 0 auto; padding: 1rem 1.1rem 3rem; }
-.wiz-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+.wiz-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.75rem; }
 .wiz-stack > * { min-width: 0; }
 .eyebrow { font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent-text); }
-.wiz-title { font-size: 1.7rem; line-height: 1.2; font-weight: 800; }
+.wiz-title { font-size: 1.4rem; line-height: 1.2; font-weight: 800; }
 .wiz-lead { font-size: 1.1rem; color: var(--muted); }
 .wiz-money {
   display: flex; align-items: center; gap: 0.5rem; background: var(--surface); border: 3px solid var(--line-strong);
-  border-radius: 20px; padding: 0 1rem; min-height: 4.6rem;
+  border-radius: 20px; padding: 0 1rem; min-height: 4rem;
 }
 .wiz-money:focus-within { border-color: var(--accent); box-shadow: 0 0 0 5px var(--accent-soft); }
 .wiz-money .cur { font-size: 1.8rem; }
-.wiz-input { flex: 1; min-width: 0; width: 100%; border: 0; outline: none; background: transparent; font-size: 2.4rem; font-weight: 800; padding: 0.4rem 0; font-variant-numeric: tabular-nums; }
+.wiz-input { flex: 1; min-width: 0; width: 100%; border: 0; outline: none; background: transparent; font-size: 2.1rem; font-weight: 800; padding: 0.4rem 0; font-variant-numeric: tabular-nums; }
 .wiz-input::placeholder { color: var(--line-strong); }
 .chip { justify-self: start; background: var(--accent-soft); color: var(--accent-text); border: 0; border-radius: 999px; padding: 0.6rem 1rem; font-weight: 700; }
 .wiz-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
@@ -239,19 +239,22 @@ dialog::backdrop { background: rgba(30, 15, 5, 0.55); }
 .cap { text-align: center; }
 
 /* "I'm asking for" badge and the (i) help in the guided setup */
-.ask { display: flex; align-items: flex-start; gap: 0.8rem; background: var(--surface); border: 2px solid var(--accent-soft); border-left: 6px solid var(--accent); border-radius: 16px; padding: 0.8rem 0.9rem; }
+.ask { display: flex; align-items: flex-start; gap: 0.8rem; background: var(--surface); border: 2px solid var(--accent-soft); border-left: 6px solid var(--accent); border-radius: 16px; padding: 0.6rem 0.9rem; }
 .ask-main { display: grid; gap: 0.15rem; flex: 1; min-width: 0; }
 .ask-label { font-size: 0.8rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent-text); }
-.ask-text { font-size: 1.15rem; font-weight: 800; line-height: 1.25; overflow-wrap: anywhere; }
+.ask-text { font-size: 1.1rem; font-weight: 800; line-height: 1.25; overflow-wrap: anywhere; }
 .ask-stage { font-size: 0.95rem; color: var(--muted); }
 .info-btn {
   flex: none; width: 2.75rem; height: 2.75rem; border-radius: 50%; border: 2px solid var(--accent); background: var(--accent-soft);
   color: var(--accent-text); font-family: Georgia, "Times New Roman", serif; font-style: italic; font-weight: 700; font-size: 1.4rem; line-height: 1;
 }
 .info-btn[aria-expanded="true"] { background: var(--accent); color: var(--accent-ink); }
-.help { background: var(--accent-soft); color: var(--ink); border-radius: 16px; padding: 0.9rem 1rem; display: grid; gap: 0.5rem; font-size: 1.02rem; }
+.help { background: var(--accent-soft); color: var(--ink); border-radius: 16px; padding: 0.7rem 0.9rem; display: grid; gap: 0.4rem; font-size: 0.95rem; line-height: 1.35; }
 .help p { overflow-wrap: anywhere; }
 .help-note { color: var(--accent-text); font-weight: 700; }
+.info-btn.sm { width: 2.2rem; height: 2.2rem; font-size: 1.15rem; align-self: center; }
+.item > .help { margin-bottom: 0.8rem; font-size: 0.98rem; }
+.foot { margin-top: 0.8rem; }
 
 /* Busy banner while a budget file is being locked or opened */
 #busy {
@@ -313,6 +316,10 @@ dialog::backdrop { background: rgba(30, 15, 5, 0.55); }
 .tiles { display: flex; flex-wrap: wrap; gap: 0.4rem; justify-content: center; width: 100%; }
 .tiles .tile { width: 3.1rem; flex: none; }
 .game .chip { justify-self: center; }
+.game-must { text-align: left; color: var(--accent-text); font-weight: 800; }
+.game-help { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
+.game-help .chip { background: var(--surface); border: 2px solid var(--line-strong); color: var(--ink); min-height: 2.9rem; }
+.game-help .game-skip { flex-basis: 100%; }
 .game-win { display: grid; gap: 0.2rem; background: var(--good-soft); color: var(--good); border-radius: 18px; padding: 1rem; animation: pop 0.35s ease-out; }
 .game-win b { font-size: 1.6rem; }
 .game-win span { font-weight: 700; }
