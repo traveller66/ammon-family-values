@@ -1,12 +1,11 @@
 {
-  "name": "family-budget",
-  "version": "0.1.0",
+  "name": "ammon-family-values",
+  "version": "0.2.0",
   "private": true,
-  "description": "End-to-end encrypted, real-time shared family budget (installable Android PWA + tiny sync server).",
+  "description": "Stand-alone family budget that lives on your own phone (installable Android web app). No server; share by emailing a locked budget file.",
   "type": "module",
   "scripts": {
-    "start": "node server/server.js",
-    "test": "node test/e2e.mjs && node test/features.mjs"
+    "test": "node test/app.test.mjs"
   },
   "engines": {
     "node": ">=18"

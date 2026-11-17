@@ -6,12 +6,12 @@
   <meta name="theme-color" content="#b8472f">
   <meta name="color-scheme" content="light dark">
   <meta name="referrer" content="no-referrer">
-  <meta name="description" content="Ammon Family Values - our shared family budget.">
-  <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icons/icon-192.png">
-  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <meta name="description" content="Ammon Family Values - our family budget, kept on your own phone.">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon-192.png">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <title>Ammon Family Values</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <noscript><p class="notice error">Ammon Family Values needs JavaScript turned on.</p></noscript>
@@ -19,31 +19,28 @@
   <!-- Shown if the page is not served over HTTPS (encryption needs a secure connection) -->
   <main id="insecure" class="screen center" hidden>
     <h1>Secure connection needed</h1>
-    <p class="lead">Ammon Family Values encrypts your numbers on this phone, which only works over a secure (https) address. Open the https link your family organizer sent you.</p>
+    <p class="lead">Ammon Family Values encrypts your numbers on this phone, which only works over a secure (https) address. Open the app from its https address.</p>
   </main>
 
   <!-- Welcome / first run -->
   <main id="welcome" class="screen center" hidden>
-    <img class="brand-mark" src="/icons/icon-192.png" alt="" width="96" height="96">
+    <img class="brand-mark" src="./icons/icon-192.png" alt="" width="96" height="96">
     <h1>Ammon Family Values</h1>
-    <p class="lead">Our family's money, together. Everyone can update the numbers, and everyone's phone stays in step.</p>
+    <p class="lead">Our family's money, kept on your own phone.</p>
     <ul class="promises">
       <li>Only numbers are saved. No names, no places.</li>
-      <li>Locked with a family key on your phone before anything is shared.</li>
+      <li>Nothing is sent anywhere. The budget stays on this phone and works with no internet.</li>
+      <li>To share, you email a locked budget file to family.</li>
     </ul>
     <button id="btn-new" class="btn btn-primary btn-xl" type="button">Set up our budget</button>
-    <div class="divider"><span>Already have an invite?</span></div>
-    <form id="join-form" class="stack" novalidate>
-      <label class="field-label" for="join-input">Paste the invite link here</label>
-      <input id="join-input" class="input" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste invite link">
-      <button class="btn btn-secondary btn-xl" type="submit">Join our family budget</button>
-    </form>
+    <div class="divider"><span>Did family email you a budget file?</span></div>
+    <button id="btn-open" class="btn btn-secondary btn-xl" type="button">Open a budget file</button>
     <p id="welcome-error" class="notice error" role="alert" hidden></p>
   </main>
 
   <!-- App lock (shown when the optional PIN lock is on) -->
   <main id="lock" class="screen center" hidden>
-    <img class="brand-mark" src="/icons/icon-192.png" alt="" width="96" height="96">
+    <img class="brand-mark" src="./icons/icon-192.png" alt="" width="96" height="96">
     <h1>Ammon Family Values</h1>
     <p class="lead">Type your PIN to open the budget.</p>
     <form id="lock-form" class="stack" novalidate>
@@ -60,7 +57,6 @@
     <header class="topbar">
       <div class="topbar-row">
         <h1 class="brand">Ammon Family Values</h1>
-        <span id="status" class="pill" data-tone="wait" role="status"><i class="dot" aria-hidden="true"></i><span id="status-text">Connecting…</span></span>
         <button id="btn-menu" class="icon-btn" type="button" aria-label="Menu">
           <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><circle cx="5" cy="12" r="2.2" fill="currentColor"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><circle cx="19" cy="12" r="2.2" fill="currentColor"/></svg>
         </button>
@@ -98,6 +94,7 @@
         <div id="expense-list" class="list"></div>
         <button class="btn btn-outline add-btn" data-kind="e" type="button">+ Add expense</button>
       </section>
+      <p id="status-text" class="hint foot">Saved only on this phone. Nothing is sent anywhere.</p>
     </main>
   </div>
 
@@ -166,11 +163,13 @@
   <dialog id="dlg-menu" class="sheet-dlg" aria-labelledby="menu-title">
     <div class="sheet">
       <h2 id="menu-title">Menu</h2>
-      <button id="m-invite" class="menu-btn" type="button">Invite family</button>
+      <button id="m-export" class="menu-btn" type="button">Send my budget to family</button>
+      <button id="m-import" class="menu-btn" type="button">Bring in a budget file from family</button>
       <button id="m-setup" class="menu-btn" type="button">Guided setup for this month</button>
       <button id="m-copyplan" class="menu-btn" type="button">Copy last month's planned amounts</button>
+      <button id="m-game" class="menu-btn" type="button">Play a puzzle</button>
       <button id="m-lock" class="menu-btn" type="button">Turn on app lock (PIN)</button>
-      <button id="m-rotate" class="menu-btn" type="button">Remove someone: make a new key</button>
+      <button id="m-sharepw" class="menu-btn" type="button">Change the sharing password</button>
       <div class="menu-row">
         <label for="m-currency">Currency</label>
         <select id="m-currency" class="input select">
@@ -186,29 +185,80 @@
         <span>Extra-large text</span>
         <input id="m-size" type="checkbox" class="switch">
       </label>
-      <button id="m-wipe" class="menu-btn danger" type="button">Delete all data from the server</button>
-      <button id="m-leave" class="menu-btn danger" type="button">Remove this budget from this phone</button>
+      <label class="menu-row switch-row" for="m-games">
+        <span>Puzzles during guided setup</span>
+        <input id="m-games" type="checkbox" class="switch">
+      </label>
+      <button id="m-leave" class="menu-btn danger" type="button">Delete this budget from this phone</button>
       <button id="m-close" class="btn btn-ghost" type="button">Close</button>
     </div>
   </dialog>
 
-  <!-- Invite -->
-  <dialog id="dlg-invite" class="sheet-dlg" aria-labelledby="invite-title">
+  <!-- Sharing password (locks the budget files) -->
+  <dialog id="dlg-pw" class="sheet-dlg" aria-labelledby="pw-title">
+    <form id="pw-form" class="sheet" novalidate>
+      <h2 id="pw-title">Sharing password</h2>
+      <p id="pw-text"></p>
+      <label class="field-label" for="pw-input">Sharing password</label>
+      <input id="pw-input" class="input" type="text" maxlength="200" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <p id="pw-hint" class="hint">At least 8 letters or numbers. A few random words work well, like "purple river toast". Capital letters do not matter.</p>
+      <p id="pw-error" class="notice error" role="alert" hidden></p>
+      <button id="pw-go" class="btn btn-primary btn-xl" type="submit">OK</button>
+      <button id="pw-cancel" class="btn btn-ghost" type="button">Cancel</button>
+    </form>
+  </dialog>
+
+  <!-- Send my budget -->
+  <dialog id="dlg-export" class="sheet-dlg" aria-labelledby="ex-title">
     <div class="sheet">
-      <h2 id="invite-title">Invite your family</h2>
-      <p>Send this link to family. Anyone who opens it can see and edit the budget, so only share it with people you trust.</p>
-      <canvas id="invite-qr" class="qr" role="img" aria-label="QR code for the invite link. Another phone can scan it with its camera to join." width="1" height="1"></canvas>
-      <p id="invite-qr-cap" class="hint cap">Or let someone scan this with their phone camera. Only show it to people you trust.</p>
-      <textarea id="invite-link" class="input link-box" readonly rows="3" aria-label="Invite link"></textarea>
-      <button id="btn-share" class="btn btn-primary btn-xl" type="button">Share link</button>
-      <button id="btn-copy" class="btn btn-secondary" type="button">Copy link</button>
-      <p class="hint">The link contains the family key. Keep it like a house key: if it is lost, nobody can recover the data.</p>
-      <button id="invite-close" class="btn btn-ghost" type="button">Done</button>
+      <h2 id="ex-title">Send my budget</h2>
+      <p>Your budget is packed into a locked file. Email it to family. They open it in their app with the sharing password, and see what changed before their budget is updated.</p>
+      <button id="ex-share" class="btn btn-primary btn-xl" type="button">Email or share the file</button>
+      <button id="ex-save" class="btn btn-secondary" type="button">Save the file on this phone</button>
+      <button id="ex-copy" class="btn btn-secondary" type="button">Copy it as text, to paste into an email</button>
+      <p id="ex-name" class="hint"></p>
+      <p class="hint">Without the sharing password the file is unreadable, so never put the password in the same email.</p>
+      <button id="ex-close" class="btn btn-ghost" type="button">Done</button>
+    </div>
+  </dialog>
+
+  <!-- Bring in a budget file -->
+  <dialog id="dlg-import" class="sheet-dlg" aria-labelledby="im-title">
+    <div class="sheet">
+      <h2 id="im-title">Bring in a budget file</h2>
+      <p id="im-text"></p>
+      <input id="im-file" type="file" accept=".txt,text/plain" hidden>
+      <button id="im-choose" class="btn btn-primary btn-xl" type="button">Choose the file</button>
+      <div class="divider"><span>or paste it</span></div>
+      <textarea id="im-paste" class="input link-box" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the budget text here" aria-label="Pasted budget text"></textarea>
+      <button id="im-read" class="btn btn-secondary" type="button">Use the pasted text</button>
+      <p id="im-error" class="notice error" role="alert" hidden></p>
+      <button id="im-cancel" class="btn btn-ghost" type="button">Cancel</button>
+    </div>
+  </dialog>
+
+  <!-- What a budget file would change -->
+  <dialog id="dlg-preview" class="sheet-dlg" aria-labelledby="pv-title">
+    <div class="sheet">
+      <h2 id="pv-title">Here is what will change</h2>
+      <p id="pv-text"></p>
+      <ul id="pv-list" class="changes"></ul>
+      <p id="pv-note" class="hint" hidden></p>
+      <button id="pv-go" class="btn btn-primary btn-xl" type="button">Update my budget</button>
+      <button id="pv-cancel" class="btn btn-ghost" type="button">Cancel, change nothing</button>
+    </div>
+  </dialog>
+
+  <!-- Puzzles, just for fun -->
+  <dialog id="dlg-game" class="sheet-dlg" aria-label="Puzzle">
+    <div class="sheet">
+      <div id="game-host"></div>
+      <button id="game-close" class="btn btn-ghost" type="button">Close</button>
     </div>
   </dialog>
 
   <div id="busy" role="status" aria-live="polite" hidden></div>
   <div id="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="/app.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

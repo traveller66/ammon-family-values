@@ -1,108 +1,100 @@
 # Ammon Family Values
 
-A shared family budget that installs on Android like an app, keeps everyone's numbers in sync, and stores **only numbers**: no names, no locations, no user info. Everything is encrypted on the phones before it is synced.
+A family budget that installs on Android like an app and lives **only on your own phone**. It stores **only numbers** (and the labels you give them): no names, no locations, no accounts. There is no server. To share, one person emails a locked budget file and the other brings it in.
 
-- **Client:** installable web app (PWA): plain HTML/CSS/JS, no build step, works offline.
-- **Server:** one zero-dependency Node file (`server/server.js`) that relays encrypted records between the phones.
-- **Needs:** Node 18+ to run the server. Nothing to `npm install`.
+- **What it is:** an installable web app (PWA): plain HTML/CSS/JS in `docs/`, no build step, nothing to `npm install`.
+- **What it talks to:** nothing. The app's code contains no network calls. After the first visit it runs with no internet.
+- **Fun part:** during guided setup, every answer earns a quick puzzle (mini sudoku, word scramble, mini crossword).
 
 ## What is stored, and where
 
 | Thing | Where it lives |
 |---|---|
-| Category labels ("Groceries"), months, planned and actual amounts | Encrypted on each phone (AES-256-GCM). The server only holds ciphertext. |
-| Family key | Only on the family's phones, inside the invite link after the `#` (browsers never send that part to a server). With the optional PIN lock on, it is stored on the phone only in locked form. |
-| Names, emails, accounts, locations, devices | Nowhere. There are no accounts. |
-| What the server *can* see | That a room exists, how many records it has, their sizes, and when they change. Your IP address is used only for in-memory rate limiting and is never logged or saved. |
+| Item labels ("Groceries"), months, planned and actual amounts | On the phone, sealed with AES-256-GCM before being written to the browser's storage. |
+| The budget key | On that phone only. With the PIN lock on, it is kept only in locked form. |
+| Budget files you send | Wherever you send them (your email). They are locked with your sharing password, so email only carries scrambled text. |
+| The sharing password | In your heads, and remembered on each phone (sealed with the budget key). |
+| Names, emails, accounts, locations, devices | Nowhere. |
 
-Every phone keeps a full (encrypted) copy. If the server is wiped (free hosts do this), the phones re-upload everything automatically.
+## Sharing by email
 
-## Run it on your computer
+1. **You:** Menu → **Send my budget to family**. The first time, you choose a **sharing password** (at least 8 characters; a few random words is best). Then **Email or share the file** opens Android's share sheet: pick your email app and send it. (**Save the file** and **Copy it as text** are there too.)
+2. **Tell her the password in person or on the phone.** Never in the same email as the file.
+3. **Her, first time:** open the app → **Open a budget file** → choose the attachment (save it to the phone first) → type the sharing password. Her phone now has the same budget and remembers the password.
+4. **Her, from then on:** she updates numbers, then Menu → **Send my budget to family** and emails you the file.
+5. **You:** Menu → **Bring in a budget file from family** → choose it. You see **exactly what will change** (for example "Groceries · Spent: $102.50 → $117.50") and nothing is updated until you tap **Update my budget**.
 
-```bash
-node server/server.js          # http://localhost:8787
-npm test                       # 27 automated checks (starts its own servers)
-```
+How two copies are combined: **for each amount, the most recently changed one wins.** Amounts the file doesn't have newer values for are left alone, so your own newer edits survive. If you both changed the same amount since you last swapped files, the preview marks it **"You changed this too"** so you can fix the total by hand if needed.
 
-`localhost` works for trying it out. Phones need **HTTPS** to install the app and to use encryption.
+A saved budget file is also your **backup**: keep one somewhere safe.
 
-## Put it online for free (my recommendation: Render)
+## Puzzles
 
-1. Put this folder in a GitHub repo (private is fine).
-2. On render.com either choose **New → Blueprint** and pick the repo (it reads `render.yaml`), or **New → Web Service** with runtime **Node**, start command `node server/server.js`, plan **Free**, and the environment variable `TRUST_PROXY=1`.
-3. Render gives you a permanent `https://something.onrender.com` address. That is your app's address.
+- In guided setup, each question you answer is followed by a short puzzle, rotating sudoku → word scramble → crossword. Each has **Skip this puzzle**. Skipping a question gives no puzzle.
+- Menu → **Play a puzzle** any time. Menu → **Puzzles during guided setup** turns the rewards off.
+- Word lists and crossword grids are in `docs/puzzles.js` (`SCRAMBLE_WORDS`, `CROSSWORDS`) and are easy to add to. `npm test` checks every crossword's words cross correctly.
 
-Free-tier behaviour (per [Render's docs](https://render.com/docs/free)): it sleeps after 15 minutes idle and takes about a minute to wake; its disk is wiped when it sleeps or restarts; they say not to use free instances for production. Because the phones hold the data, the wipes are harmless. The cost is a slow first sync after a long idle. **I have not deployed to Render myself.** `render.yaml` follows Render's blueprint field names but has never been run.
+## Getting it onto the phones (free, no server)
 
-Alternative: run `node server/server.js` on an always-on computer and expose it with a Cloudflare Tunnel. The tunnel is free, but a permanent address needs a domain you own. The free temporary "quick tunnel" addresses change on every restart.
+A web app has to be opened from an https address once to be installed. GitHub Pages can hand out the app's files for free. It only serves the files in `docs/`; it never sees any budget data, because the app never sends any.
 
-A `Dockerfile` is included for any container host (never built: there was no Docker engine available where I worked).
+1. Push this repository to GitHub.
+2. Repo **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `main`, folder: `/docs` → Save**.
+3. After a minute the address is `https://<your-github-name>.github.io/ammon-family-values/`.
+4. On each phone: open that address in **Chrome** → **⋮ → Install app** (or **Add to Home screen**).
 
-Settings (environment variables): `PORT`, `DATA_FILE` (default `data/rooms.json`), `TRUST_PROXY=1` behind a proxy, `MAX_ROOMS`, `MAX_RECORDS`, `CREATE_BURST`.
+On GitHub's free plan, Pages needs the repository to be **public**. That exposes this code, not your budget. This Pages setup has not been run yet.
 
-## Install on Android
-
-1. Open your https address in **Chrome** on the phone.
-2. Tap **⋮ → Install app** (or **Add to Home screen**). It now opens full-screen like any app.
-3. First phone: **Set up our budget**. The guided setup asks for each value one at a time.
-4. At the end, tap **Invite my family** (or **⋮ menu → Invite family**). Send the link, or let a family member scan the QR code on your screen with their camera. Each person opens it once, and the phone remembers.
-
-Treat the invite link like a house key: anyone with it can see and edit the budget, and nobody can recover the data if every copy of the key is lost.
+To try it on a computer instead: `npx serve docs` (or any static file server) and open the `localhost` address it prints.
 
 ## Using it
 
-- **Guided setup** asks for one value per screen. Each screen has an **"I'm asking for"** line (for example "Net income: your take-home pay after taxes") and an **(i)** button. Hover over it on a computer, or tap it on a phone, for a longer explanation. The wording lives in `HELP` in `public/model.js` if you want to change it (for instance to ask for gross income instead of net).
-- **Big boxes:** type a number and it saves by itself (the pill at the top says **Saved**, **Offline, saved here**, etc.).
-- **Connects only when needed:** the app talks to the server when it opens, when it comes back to the front, and each time a change is saved, then disconnects so a free host can stay asleep. Other phones see your change the next time they open the app or save something. To get instant live updates instead, change `live: false` to `live: true` in `public/app.js`.
-- **+ Add spending** (or **+ Add money received**) on each item: type `12.50` and it is added to the running total. **Subtract** is there for refunds and mistakes.
+- **Guided setup** asks for one value per screen, with an **"I'm asking for"** line and an **(i)** button for a longer explanation. The wording is in `HELP` in `docs/model.js`.
+- **Big boxes:** type a number and it saves by itself.
+- **+ Add spending** / **+ Add money received**: type `12.50` and it is added to the running total. **Subtract** is for refunds and mistakes.
 - Tap an item's name to rename or delete it; **+ Add income / + Add expense** adds more.
-- Arrows at the top change months. Menu → **Copy last month's planned amounts** saves retyping; **Guided setup for this month** walks through everything again.
-- **App lock (PIN):** Menu → *Turn on app lock*. 4 to 8 numbers, asked when the app opens and again after a minute away. Five wrong tries makes you wait 30 seconds. **I forgot my PIN** removes the budget from that phone only; rejoin with an invite link.
-- **Remove someone:** Menu → *Remove someone: make a new key*. The budget moves to a new room under a new key, the old room is deleted, and you get a new invite link to send to everyone you still want in. Phones with the old link are signed out.
-- Menu also has currency, extra-large text, **Delete all data from the server**, and **Remove this budget from this phone**.
-- Works offline: edits are queued on the phone and sent when it reconnects.
+- Arrows change months. Menu → **Copy last month's planned amounts**; **Guided setup for this month** walks through everything again.
+- **App lock (PIN):** Menu → *Turn on app lock*. 4 to 8 numbers, asked when the app opens and after a minute away. Five wrong tries makes you wait 30 seconds. A forgotten PIN cannot be recovered: **I forgot my PIN** deletes the budget from that phone, and a budget file from family brings it back.
+- Menu also has **Change the sharing password**, currency, extra-large text, and **Delete this budget from this phone**.
 
 ## What was and wasn't verified
 
-- **Verified (automated, `npm test`, 27 checks):** the real server and real client code: live sync, concurrent edits, offline queue, server restart, full server wipe and recovery, delete-all, wrong-key rejection, input validation, rate limiting, that the server's data file contains no readable names, labels, amounts, key or token, the PIN lock (right PIN, wrong PIN, tampering), the new-key move (old key locked out, new key sees the same numbers, failures leave the old budget intact, a lost reply to the delete), the QR structure, the setup help text, that every file the app needs is in the offline cache list, a 150-edit offline backlog draining through the server's rate limit, and the connect-only-when-needed mode (no open connection, syncs on open, save and wake-up).
-- **Verified (headless Chrome at phone size, two separate "phones"):** guided setup, the "I'm asking for" help and (i) button, invite link, live edits both ways, quick add and subtract, the QR code on screen (decoded by a software scanner back to the exact invite link; separately, 450 realistic invite-link QR codes were run through two independent scanners, which read 450 and 449 of them, and the one miss read fine at another image size), PIN lock (set, restart, wrong and right PIN, lock after two minutes away, wait after five wrong tries, turn off), the new-key flow with a second phone being signed out and rejoining, reload, month change, dark mode, extra-large text, and a layout sweep for sideways overflow on every screen and box.
-- **Not re-run since the app was switched to connect-only-when-needed:** the headless Chrome checks above (they were run with live updates on).
-- **Not verified:** a real Android device, installing it as an app, the offline service worker across a cold start, real camera scanning of the QR code (it decodes with a software scanner), and any hosted deployment (Render, Cloudflare, Docker).
+- **Verified (automated, `npm test`, 20 checks on the real app code):** saving and reopening; that storage holds no readable labels, amounts or key; that data from the earlier server-based version still opens; that the app's code has no network calls; that every file is in the offline list and every element the code uses exists; locking and opening budget files (wrong password, altered file, wrong kind of file, text re-wrapped by email); a second phone opening a file; newer-wins merging both ways; the both-changed warning; renames, removals and cleared amounts; separately set-up phones lining up by item name; the PIN lock; the sealed sharing password; setup help text; 500 generated sudokus each having exactly one answer; every scramble word; every crossword grid.
+- **Verified (headless Chrome at phone size, two separate "phones", 14 checks, `test/browser.mjs`):** setup with all three puzzles solved by tapping, wrong moves showing the warning, skipping, puzzles off; sending a file; the second phone opening it (wrong password and wrong file refused); an update coming back with the preview, Cancel, and Update; pasting the file as text; puzzles from the menu; PIN lock; reload and use with the network off; small-phone dark mode with extra-large text; no sideways overflow on any screen; no console errors; and that the only requests made were for the app's own files.
+- **Not verified:** a real Android phone. In particular: installing it, Android's share sheet handing the file to an email app (the test used "Save the file"), opening an attachment from an email app, and the GitHub Pages setup.
 
 ## Known limits
 
-- **Two people adding to the same item at the same instant:** the last save wins, so one of the two amounts can be lost. Each add shows the new total so you can notice, but a true fix is in the list below.
-- **PIN lock is a casual lock.** The key is stored only in locked form, but a 4 to 8 digit PIN can be guessed offline by someone who copies the phone's storage. It keeps out someone who picks up an unlocked phone, not a determined attacker.
-- **Removing someone cannot take back what they already saw,** and anyone who still has a copy of the old link can read old data they already downloaded. The new key only stops future access.
-- During a new-key move, edits that other phones make in those few seconds are not copied. Do it when nobody is editing.
-- The server can see record counts, sizes and timing (not content).
-- It is a PWA, not a Play Store APK (see below).
+- **Newest change wins, per amount.** If you both add spending to the same item between swaps, the later total replaces the earlier one instead of adding them. The preview flags it; fix the total by hand. (The real fix is the first item below.)
+- **"Newest" uses each phone's clock.** A phone with a badly wrong clock can win or lose when it shouldn't.
+- **The budget file is only as safe as the sharing password.** A short or guessable password can be cracked by someone who gets the file. Capital letters and extra spaces are ignored so two people typing it don't lock each other out.
+- **The PIN lock is a casual lock.** A 4 to 8 digit PIN can be guessed by someone who copies the phone's storage. It keeps out someone who picks up an unlocked phone.
+- **No automatic backup.** Clearing the browser's site data or uninstalling deletes the budget from that phone. Keep a budget file.
+- It is a PWA, not a Play Store APK.
 
 ## What to extend first
 
-1. **Test on a real phone and deploy it.** Everything else depends on this.
-2. **Make adds conflict-proof:** store each "add spending" as its own record and sum them, instead of overwriting one total. That also gives you a history.
+1. **Make adds combine instead of replace:** store each "add spending" as its own entry and sum them. That removes the main limit above and gives a history.
+2. **Test on a real phone.**
 3. **Yearly overview and rollover** of leftover money between months.
-4. **Biometric unlock** (WebAuthn) in place of, or next to, the PIN.
-5. **Real APK** via Bubblewrap (Trusted Web Activity) once it is hosted at a permanent https address.
-6. **Encrypted backup export.**
+4. **More puzzles:** bigger word lists, 6 x 6 sudoku, a longer crossword as a "month finished" reward.
+5. **Biometric unlock** (WebAuthn) next to the PIN.
+6. **Real APK** via Bubblewrap (Trusted Web Activity) once the Pages address exists.
 
 ## Layout
 
 ```
-server/server.js      sync server + static file host (zero dependencies)
-public/index.html     screens and dialogs
-public/style.css      warm theme, large touch targets, dark mode
-public/app.js         UI, guided setup, quick add, lock, new-key flow
-public/model.js       budget state, money math, setup help text (no DOM)
-public/vault.js       key derivation and AES-GCM encryption
-public/sync.js        sync (on demand or live), offline queue, reconnect, server-wipe recovery
-public/lock.js        PIN lock: wraps the family key with a PIN-derived key
-public/rotate.js      "make a new key": moves the budget to a new room, then deletes the old one
-public/qr.js          QR code generator (no libraries)
-public/sw.js          offline app shell
-test/e2e.mjs          end-to-end tests: sync, security, resilience
-test/features.mjs     PIN lock, new key, QR, help text, backlog
-render.yaml           Render deploy file (untested)
-Dockerfile            container build (untested)
+docs/index.html     screens and dialogs
+docs/style.css      warm theme, large touch targets, dark mode
+docs/app.js         UI: guided setup, quick add, lock, send / bring in, puzzles
+docs/model.js       budget state, money math, setup help text, budget-file merge rules (no DOM)
+docs/local.js       sealed storage on the phone
+docs/vault.js       key derivation and AES-GCM sealing
+docs/share.js       budget files: locking with the sharing password, reading them back
+docs/lock.js        PIN lock: wraps the budget key with a PIN-derived key
+docs/puzzles.js     sudoku maker, scramble words, crossword grids (no DOM)
+docs/games.js       draws the puzzles
+docs/sw.js          offline app shell
+test/app.test.mjs   automated checks (npm test)
+test/browser.mjs    phone-size browser run (needs Playwright and Chrome; optional)
 ```

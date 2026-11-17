@@ -1,7 +1,8 @@
 // DOM-free budget state. Amounts are integer cents. The only things ever stored are:
-//   category records:  {t:'cat', n:label, k:'i'|'e', o:order, x:deleted?}
-//   value records:     {t:'val', c:categoryId, m:'YYYY-MM', f:'p'|'a', v:cents|null}
+//   category records:  {t:'cat', n:label, k:'i'|'e', o:order, x:deleted?, u:changedAt}
+//   value records:     {t:'val', c:categoryId, m:'YYYY-MM', f:'p'|'a', v:cents|null, u:changedAt}
 // i.e. numbers tied to the field they belong to - no names, locations or user info.
+// `u` is when the field was last changed (ms). It decides which copy wins when a budget file from family is brought in.
 
 export const APP_NAME = 'Ammon Family Values';
 
@@ -26,8 +27,9 @@ export function monthLabel(m, locale) {
 }
 
 export const valLabel = (cat, month, field) => `v|${cat}|${month}|${field}`;
-export const valPayload = (cat, month, field, cents) => ({ t: 'val', c: cat, m: month, f: field, v: cents });
-export const catPayload = (name, kind, order, deleted = false) => ({ t: 'cat', n: name, k: kind, o: order, x: deleted ? 1 : 0 });
+export const valPayload = (cat, month, field, cents, u = Date.now()) => ({ t: 'val', c: cat, m: month, f: field, v: cents, u });
+export const catPayload = (name, kind, order, deleted = false, u = Date.now()) => ({ t: 'cat', n: name, k: kind, o: order, x: deleted ? 1 : 0, u });
+const stamp = (u) => (Number.isSafeInteger(u) && u > 0 ? u : 0);
 
 /** "12.5", "$1,200", "1200.00", "12,50" -> cents. Empty -> {ok:true, cents:null} (clears the field). */
 export function parseMoney(input) {
@@ -133,39 +135,28 @@ export function helpFor(name, kind, field) {
 
 export class Budget {
   constructor() {
-    this.isHeld = () => false; // set by the app: true while we have an unsent local edit for rid
     this.reset();
   }
   reset() {
-    this.cats = new Map(); // id -> {id,name,kind,order,deleted}
+    this.cats = new Map(); // id -> {id,name,kind,order,deleted,u}
     this.vals = new Map(); // 'cat|month|field' -> cents|null
-    this.seqs = new Map(); // rid -> highest server seq applied
-  }
-  resetSeqs() {
-    this.seqs.clear();
+    this.valU = new Map(); // 'cat|month|field' -> when it was last changed
   }
 
-  /** seq === null means a local optimistic edit. Server events apply only if newer (last writer wins). */
-  apply(rid, payload, seq = null) {
-    if (seq !== null) {
-      if (seq <= (this.seqs.get(rid) ?? 0)) return false;
-      this.seqs.set(rid, seq);
-      if (this.isHeld(rid)) return false; // our own newer edit is still on its way to the server
-    }
-    return this._set(rid, payload);
-  }
-
-  _set(rid, p) {
+  /** Put one record into the budget. Returns false if it is not a valid record. */
+  apply(rid, p) {
     if (!p || typeof p !== 'object') return false;
     if (p.t === 'cat') {
-      if (typeof p.n !== 'string' || p.n.length > 40 || (p.k !== 'i' && p.k !== 'e') || !Number.isFinite(p.o)) return false;
-      this.cats.set(rid, { id: rid, name: p.n, kind: p.k, order: p.o, deleted: !!p.x });
+      if (!HEX32.test(rid) || typeof p.n !== 'string' || p.n.length > 40 || (p.k !== 'i' && p.k !== 'e') || !Number.isFinite(p.o)) return false;
+      this.cats.set(rid, { id: rid, name: p.n, kind: p.k, order: p.o, deleted: !!p.x, u: stamp(p.u) });
       return true;
     }
     if (p.t === 'val') {
       if (!HEX32.test(p.c) || !MONTH_RE.test(p.m) || (p.f !== 'p' && p.f !== 'a')) return false;
       if (p.v !== null && !Number.isSafeInteger(p.v)) return false;
-      this.vals.set(`${p.c}|${p.m}|${p.f}`, p.v);
+      const key = `${p.c}|${p.m}|${p.f}`;
+      this.vals.set(key, p.v);
+      this.valU.set(key, stamp(p.u));
       return true;
     }
     return false;
@@ -204,4 +195,109 @@ export class Budget {
     }
     return t;
   }
+}
+
+/* ------------------------------------------------------------------ budget files (export / import) */
+
+/** Everything in the budget as plain data, ready to be locked into a budget file. Still only labels and numbers. */
+export function exportData(budget, now = Date.now()) {
+  const cats = [...budget.cats.values()].map((c) => ({ id: c.id, n: c.name, k: c.kind, o: c.order, x: c.deleted ? 1 : 0, u: c.u }));
+  const vals = [];
+  for (const [key, v] of budget.vals) {
+    const [c, m, f] = key.split('|');
+    if (budget.cats.has(c)) vals.push({ c, m, f, v, u: budget.valU.get(key) ?? 0 });
+  }
+  return { v: 1, at: now, cats, vals };
+}
+
+/** Checks the inside of a budget file and returns a clean copy. Throws if it is not a budget. */
+export function cleanImport(data) {
+  if (!data || typeof data !== 'object' || data.v !== 1 || !Array.isArray(data.cats) || !Array.isArray(data.vals)) {
+    throw new Error('not a budget');
+  }
+  if (data.cats.length > 2000 || data.vals.length > 200000) throw new Error('too big');
+  const probe = new Budget();
+  const cats = [];
+  for (const c of data.cats) {
+    if (!c || typeof c !== 'object') continue;
+    if (probe.apply(c.id, { t: 'cat', n: c.n, k: c.k, o: c.o, x: c.x })) cats.push({ id: c.id, n: c.n, k: c.k, o: c.o, x: c.x ? 1 : 0, u: stamp(c.u) });
+  }
+  const vals = [];
+  for (const r of data.vals) {
+    if (!r || typeof r !== 'object') continue;
+    if (probe.apply('', { t: 'val', c: r.c, m: r.m, f: r.f, v: r.v })) vals.push({ c: r.c, m: r.m, f: r.f, v: r.v, u: stamp(r.u) });
+  }
+  return { v: 1, at: stamp(data.at), cats, vals };
+}
+
+const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Works out what bringing in a budget file would change, without changing anything.
+ * Rule: for every field, the copy that was changed most recently wins. Fields the file does not mention are left alone.
+ * Items normally match by their id (both phones started from the same budget). If two phones were set up separately,
+ * items with the same name are treated as the same item.
+ * `lastShared` is when this phone last sent or brought in a file: a field changed on this phone since then, and changed
+ * to something else in the file, is flagged `both` so the person can see it before agreeing.
+ */
+export function planMerge(budget, data, lastShared = 0) {
+  const fileIds = new Set(data.cats.map((c) => c.id));
+  const taken = new Set();
+  const idMap = new Map(); // id in the file -> id on this phone
+  const cats = [];
+  const names = new Map(); // id on this phone -> name after the merge
+  for (const c of budget.cats.values()) names.set(c.id, c.name);
+
+  for (const c of data.cats) {
+    const mine = budget.cats.get(c.id);
+    if (mine) {
+      idMap.set(c.id, c.id);
+      taken.add(c.id);
+      const differs = mine.name !== c.n || mine.kind !== c.k || mine.order !== c.o || mine.deleted !== !!c.x;
+      if (differs && c.u > mine.u) {
+        const change = c.x && !mine.deleted ? 'removed' : !c.x && mine.deleted ? 'added' : mine.name !== c.n ? 'renamed' : 'moved';
+        cats.push({ id: c.id, payload: catPayload(c.n, c.k, c.o, !!c.x, c.u), change, name: c.n, was: mine.name });
+        names.set(c.id, c.n);
+      }
+      continue;
+    }
+    if (c.x) continue; // an item that was removed there and never existed here
+    const twin = [...budget.cats.values()].find((m) => !m.deleted && m.kind === c.k && sameName(m.name, c.n) && !fileIds.has(m.id) && !taken.has(m.id));
+    if (twin) {
+      idMap.set(c.id, twin.id);
+      taken.add(twin.id);
+      continue;
+    }
+    idMap.set(c.id, c.id);
+    cats.push({ id: c.id, payload: catPayload(c.n, c.k, c.o, false, c.u), change: 'added', name: c.n });
+    names.set(c.id, c.n);
+  }
+
+  const vals = [];
+  let kept = 0;
+  for (const r of data.vals) {
+    const c = idMap.get(r.c);
+    if (!c) continue;
+    const key = `${c}|${r.m}|${r.f}`;
+    const has = budget.vals.has(key);
+    const mine = has ? budget.vals.get(key) : null;
+    if (mine === r.v) continue;
+    const mineU = has ? budget.valU.get(key) ?? 0 : -1;
+    if (r.u <= mineU) {
+      if (mine !== null) kept++;
+      continue;
+    }
+    if (!has && r.v === null) continue;
+    const kind = budget.cats.get(c)?.kind ?? data.cats.find((x) => x.id === r.c)?.k ?? 'e';
+    vals.push({
+      c, m: r.m, f: r.f, kind,
+      name: names.get(c) ?? '',
+      from: mine,
+      to: r.v,
+      both: mine !== null && mineU > lastShared,
+      payload: valPayload(c, r.m, r.f, r.v, r.u),
+    });
+  }
+  vals.sort((a, b) => (a.m < b.m ? 1 : a.m > b.m ? -1 : 0) || a.name.localeCompare(b.name) || (a.f < b.f ? 1 : -1));
+  return { cats, vals, kept, total: cats.length + vals.length };
 }

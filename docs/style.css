@@ -123,16 +123,7 @@ button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .icon-btn { flex: none; }
 .month-nav { justify-content: space-between; margin-top: 0.6rem; }
 .month-label { font-size: 1.35rem; font-weight: 800; text-align: center; flex: 1; }
-.pill {
-  display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.7rem; border-radius: 999px;
-  background: var(--surface); border: 1px solid var(--line-strong); font-size: 0.85rem; font-weight: 700; white-space: nowrap;
-}
-.dot { width: 0.65rem; height: 0.65rem; border-radius: 50%; background: var(--wait); }
-.pill[data-tone="ok"] .dot { background: var(--good); }
-.pill[data-tone="off"] .dot { background: var(--muted); }
-.pill[data-tone="bad"] .dot { background: var(--bad); }
-.pill[data-tone="wait"] .dot { animation: pulse 1.2s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: 0.3; } }
+.foot { text-align: center; }
 
 /* Summary */
 .hero {
@@ -245,8 +236,6 @@ dialog::backdrop { background: rgba(30, 15, 5, 0.55); }
 /* PIN boxes */
 .pin { text-align: center; font-size: 1.7rem; font-weight: 800; letter-spacing: 0.35em; min-height: 3.8rem; }
 
-/* QR code */
-.qr { width: min(100%, 300px); height: auto; aspect-ratio: 1; justify-self: center; background: #fff; border-radius: 14px; image-rendering: pixelated; box-shadow: var(--shadow); }
 .cap { text-align: center; }
 
 /* "I'm asking for" badge and the (i) help in the guided setup */
@@ -264,12 +253,73 @@ dialog::backdrop { background: rgba(30, 15, 5, 0.55); }
 .help p { overflow-wrap: anywhere; }
 .help-note { color: var(--accent-text); font-weight: 700; }
 
-/* Busy banner while a new key is being made */
+/* Busy banner while a budget file is being locked or opened */
 #busy {
   position: fixed; left: 50%; top: calc(1rem + env(safe-area-inset-top)); transform: translateX(-50%); z-index: 100;
   background: var(--ink); color: var(--bg); padding: 0.8rem 1.2rem; border-radius: 999px; font-weight: 700; max-width: 92vw; text-align: center;
 }
-body.busy #budget { pointer-events: none; opacity: 0.55; }
+
+
+/* What a budget file would change */
+.changes { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; max-height: 42vh; overflow-y: auto; }
+.changes li { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 0.65rem 0.9rem; display: grid; gap: 0.1rem; overflow-wrap: anywhere; }
+.changes li.both { border-color: var(--wait); border-width: 2px; }
+.changes .delta { font-weight: 800; font-variant-numeric: tabular-nums; }
+.changes .tag { justify-self: start; font-size: 0.8rem; font-weight: 800; color: var(--ink); background: color-mix(in srgb, var(--wait) 28%, var(--surface)); border-radius: 999px; padding: 0.1rem 0.6rem; margin-top: 0.2rem; }
+
+/* Reward puzzles */
+.game { text-align: center; }
+.game .eyebrow { text-align: left; }
+.game-praise { text-align: left; font-size: 1.3rem; }
+.game-board { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.9rem; justify-items: center; }
+.game-how { color: var(--muted); font-size: 1rem; text-align: left; justify-self: stretch; }
+.game-clue { font-size: 1.15rem; justify-self: stretch; text-align: left; background: var(--surface); border: 2px solid var(--accent-soft); border-left: 6px solid var(--accent); border-radius: 16px; padding: 0.7rem 0.9rem; }
+.game-clue span { color: var(--muted); font-weight: 700; }
+.game-status { min-height: 1.4rem; font-weight: 700; color: var(--bad); }
+.sq {
+  position: relative; display: grid; place-items: center; width: 100%; aspect-ratio: 1; padding: 0; min-width: 0;
+  background: var(--surface); border: 2px solid var(--line-strong); border-radius: 10px;
+  font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; text-transform: uppercase; color: var(--accent-text);
+}
+.sq.given { background: var(--surface-2); color: var(--ink); cursor: default; }
+.sq.sel { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); z-index: 1; }
+.sq.bad { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+.sq:disabled { opacity: 1; }
+.sudoku { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.3rem; width: min(100%, 17rem); background: var(--line); border-radius: 16px; padding: 0.45rem; }
+.sudoku .sq { font-size: 1.8rem; }
+.sudoku .edge-r { margin-right: 0.5rem; }
+.sudoku .edge-b { margin-bottom: 0.5rem; }
+.xword { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 2.6rem)); gap: 0.2rem; justify-content: center; width: 100%; }
+.xword .num { position: absolute; top: 0.1rem; left: 0.25rem; font-size: 0.65rem; font-weight: 800; color: var(--muted); }
+.clues { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; text-align: left; justify-self: stretch; }
+.clues li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 0.4rem 0.7rem; font-size: 0.95rem; }
+.clues b { color: var(--accent-text); }
+/* The letter and number keys stay in reach at the bottom of the screen while the puzzle scrolls. */
+.keys { display: grid; gap: 0.4rem; width: 100%; max-width: 24rem; position: sticky; bottom: 0; z-index: 2; background: var(--bg); padding: 0.5rem 0 calc(0.5rem + env(safe-area-inset-bottom)); }
+.keys-5 { grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.5fr); }
+.keys-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.keys-6 .key-clear { grid-column: span 2; }
+.key {
+  min-height: 3.1rem; padding: 0; border-radius: 12px; border: 0; background: var(--accent-soft); color: var(--accent-text);
+  font-size: 1.3rem; font-weight: 800; box-shadow: 0 2px 0 var(--line-strong);
+}
+.key:active { transform: translateY(2px); box-shadow: none; }
+.key:disabled { opacity: 0.25; box-shadow: none; }
+.key-clear { font-size: 0.95rem; background: var(--surface); border: 2px solid var(--line-strong); color: var(--muted); box-shadow: none; }
+.slots { display: flex; gap: 0.3rem; justify-content: center; width: 100%; }
+.slots .slot { flex: 1 1 0; max-width: 3rem; border-style: dashed; }
+.slots .slot.full { border-style: solid; }
+.slots.bad .slot { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+.tiles { display: flex; flex-wrap: wrap; gap: 0.4rem; justify-content: center; width: 100%; }
+.tiles .tile { width: 3.1rem; flex: none; }
+.game .chip { justify-self: center; }
+.game-win { display: grid; gap: 0.2rem; background: var(--good-soft); color: var(--good); border-radius: 18px; padding: 1rem; animation: pop 0.35s ease-out; }
+.game-win b { font-size: 1.6rem; }
+.game-win span { font-weight: 700; }
+.game.won .sq { border-color: var(--good); color: var(--good); background: var(--good-soft); }
+.game.won .keys, .game.won .tiles, .game.won .chip, .game.won .game-how { display: none; }
+@keyframes pop { 0% { transform: scale(0.85); opacity: 0; } 70% { transform: scale(1.04); } 100% { transform: scale(1); opacity: 1; } }
+#dlg-game .game-praise { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }

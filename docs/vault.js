@@ -1,9 +1,7 @@
-// Client-side crypto. The family key never leaves the phones; the server only ever
-// sees an opaque room id, an auth token it can verify but not forge, and AES-GCM ciphertext.
+// On-phone crypto. The budget key never leaves this phone.
 //
-// One random 32-byte family key is expanded with HKDF into four independent secrets:
-//   room  -> opaque room id (so the server cannot derive the key from it)
-//   auth  -> bearer token proving "I hold the key" (server stores only its SHA-256)
+// One random 32-byte budget key is expanded with HKDF into independent secrets:
+//   room  -> an id that ties the saved records to this key
 //   enc   -> AES-256-GCM key used to seal every record
 //   rid   -> HMAC key that turns field labels into opaque record ids
 
@@ -44,18 +42,11 @@ async function hkdf(root, label, bytes) {
 
 export async function deriveVault(familyKey) {
   const root = b64u.dec(familyKey);
-  if (root.length !== 32) throw new Error('That does not look like a valid family key.');
-  const [room, auth, encKey, ridKey] = await Promise.all([
-    hkdf(root, 'room', 16),
-    hkdf(root, 'auth', 32),
-    hkdf(root, 'enc', 32),
-    hkdf(root, 'rid', 32),
-  ]);
+  if (root.length !== 32) throw new Error('That does not look like a valid budget key.');
+  const [room, encKey, ridKey] = await Promise.all([hkdf(root, 'room', 16), hkdf(root, 'enc', 32), hkdf(root, 'rid', 32)]);
   const aes = await crypto.subtle.importKey('raw', encKey, 'AES-GCM', false, ['encrypt', 'decrypt']);
   const hmac = await crypto.subtle.importKey('raw', ridKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const authToken = b64u.enc(auth);
-  const authHash = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(authToken))));
-  return { roomId: hex(room), authToken, authHash, aes, hmac };
+  return { bookId: hex(room), aes, hmac };
 }
 
 /** Deterministic, opaque id for a labelled field (same cell on every phone -> same id). */
@@ -69,7 +60,7 @@ export function randomRecordId() {
   return hex(crypto.getRandomValues(new Uint8Array(16)));
 }
 
-/** Encrypt a JSON value. The record id is bound in as AAD, so a server cannot swap records around. */
+/** Encrypt a JSON value. The record id is bound in as AAD, so sealed records cannot be swapped around. */
 export async function seal(vault, rid, obj) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt(

@@ -1,14 +1,18 @@
-// Ammon Family Values - UI. All data handling lives in vault.js / model.js / sync.js.
+// Ammon Family Values - UI. All data handling lives in vault.js / model.js / local.js / share.js.
+// Stand-alone: this app has no server and makes no network requests of its own. The budget lives on this phone;
+// to share it, the person sends a locked budget file (by email, for example) and family brings it in.
 import { newFamilyKey, deriveVault, recordId, randomRecordId } from './vault.js';
 import { store } from './store.js';
 import {
   APP_NAME, DEFAULT_CATEGORIES, Budget, monthKey, shiftMonth, monthLabel,
   parseMoney, formatMoney, centsToInput, valLabel, valPayload, catPayload, helpFor,
+  exportData, cleanImport, planMerge,
 } from './model.js';
-import { SyncClient } from './sync.js';
+import { LocalBook } from './local.js';
 import { wrapKey, unwrapKey, validPin } from './lock.js';
-import { migrateTo } from './rotate.js';
-import { makeQr } from './qr.js';
+import { sealFile, parseFile, openFile, fileName, validPassword, MIN_PASSWORD } from './share.js';
+import { mountGame } from './games.js';
+import { GAME_KINDS } from './puzzles.js';
 
 /* ------------------------------------------------------------------ helpers */
 const $ = (sel) => document.querySelector(sel);
@@ -33,7 +37,13 @@ function toast(msg) {
   el.textContent = msg;
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+function busy(msg) {
+  const el = $('#busy');
+  el.textContent = msg || '';
+  el.hidden = !msg;
 }
 
 function show(name) {
@@ -43,8 +53,8 @@ function show(name) {
 /* ------------------------------------------------------------------ state */
 const budget = new Budget();
 let vault = null;
-let sync = null;
-let familyKey = null;
+let book = null; // the sealed copy of the budget on this phone
+let familyKey = null; // this phone's budget key (never leaves the phone)
 let month = monthKey();
 let currency = store.get('fb.currency') || 'USD';
 const rows = { i: new Map(), e: new Map() };
@@ -67,20 +77,20 @@ const enqueue = (fn) => (chain = chain.then(fn).catch((e) => console.error(e)));
 
 function putRecord(rid, payload) {
   return enqueue(async () => {
-    if (!sync) return; // locked or signed out: nothing to save to
+    if (!book) return; // locked or no budget: nothing to save to
     budget.apply(rid, payload);
     scheduleRender();
-    await sync.put(rid, payload);
+    await book.put(rid, payload);
   });
 }
 function setValue(catId, m, field, cents) {
   return enqueue(async () => {
-    if (!sync || !vault) return;
+    if (!book || !vault) return;
     const rid = await recordId(vault, valLabel(catId, m, field));
     const payload = valPayload(catId, m, field, cents);
     budget.apply(rid, payload);
     scheduleRender();
-    await sync.put(rid, payload);
+    await book.put(rid, payload);
   });
 }
 async function seedDefaults() {
@@ -91,45 +101,29 @@ async function seedDefaults() {
 }
 
 /* ------------------------------------------------------------------ session */
-function keyFromText(text) {
-  const m = String(text ?? '').trim().match(/(?:k=)?([A-Za-z0-9_-]{43})$/);
-  return m ? m[1] : null;
-}
-
 async function enter(key, creator) {
   familyKey = key;
   vault = await deriveVault(key);
   if (!loadWrapped()) store.set('fb.key', key); // with the PIN lock on, the key is never stored in the clear
   budget.reset();
-  sync = new SyncClient({
-    vault,
-    creator,
-    live: false, // connect only to sync (on open and on each save) so the server can stay asleep
-    onRecord: (rid, payload, seq) => {
-      if (budget.apply(rid, payload, seq)) scheduleRender();
-    },
-    onStatus,
-    onReset: () => budget.resetSeqs(),
-  });
-  budget.isHeld = (rid) => sync.hasPending(rid);
+  book = new LocalBook({ vault, onRecord: (rid, payload) => budget.apply(rid, payload) });
+  await book.start();
   show('budget');
   render();
-  await sync.start();
   if (creator) {
     await seedDefaults();
     openWizard(true);
   }
 }
 
+const KEEP = ['fb.size', 'fb.currency', 'fb.games', 'fb.gameN', 'fb.solved']; // look-and-feel choices that are not budget data
 function leaveLocal(message) {
-  sync?.stop();
-  sync = null;
+  book = null;
   vault = null;
   familyKey = null;
-  const keep = { size: store.get('fb.size'), cur: store.get('fb.currency') };
+  const keep = KEEP.map((k) => [k, store.get(k)]);
   store.clearAll();
-  if (keep.size) store.set('fb.size', keep.size);
-  if (keep.cur) store.set('fb.currency', keep.cur);
+  for (const [k, v] of keep) if (v) store.set(k, v);
   budget.reset();
   rows.i.clear();
   rows.e.clear();
@@ -140,25 +134,6 @@ function leaveLocal(message) {
   const err = $('#welcome-error');
   err.hidden = !message;
   err.textContent = message || '';
-}
-
-const STATUS = {
-  connecting: ['Connecting…', 'wait'],
-  online: ['Live', 'ok'],
-  idle: ['Saved', 'ok'],
-  reconnecting: ['Reconnecting…', 'wait'],
-  offline: ['Offline, saved here', 'off'],
-  missing: ['Not found', 'bad'],
-  unauthorized: ['Not allowed', 'bad'],
-  deleted: ['Deleted', 'bad'],
-};
-function onStatus(s) {
-  const [text, tone] = STATUS[s] ?? STATUS.connecting;
-  $('#status').dataset.tone = tone;
-  $('#status-text').textContent = text;
-  if (s === 'missing') leaveLocal("We couldn't find a budget for that invite. Ask for a fresh link and try again.");
-  else if (s === 'unauthorized') leaveLocal('That invite was not accepted. Ask for a fresh link.');
-  else if (s === 'deleted') leaveLocal('This budget was moved or deleted. Ask for a new invite link.');
 }
 
 /* ------------------------------------------------------------------ rendering */
@@ -185,7 +160,7 @@ function render() {
   $('#sum-spent-plan').textContent = `of ${fmt(t.expenseP)} planned`;
   reconcile('i');
   reconcile('e');
-  if (addCtx && $('#dlg-add').open) refreshAdd(); // keep the open "add" box in step with live changes from family
+  if (addCtx && $('#dlg-add').open) refreshAdd(); // keep an open "add" box in step with the numbers
 }
 
 function reconcile(kind) {
@@ -323,49 +298,6 @@ function openCategoryDialog(id, kind) {
 }
 
 /* ------------------------------------------------------------------ menu actions */
-function inviteLink() {
-  return `${location.origin}${location.pathname}#k=${familyKey}`;
-}
-/** Draw a QR code on a canvas: black squares on white with the 4-square quiet border scanners need. */
-function drawQr(canvas, text) {
-  const q = makeQr(text);
-  const quiet = 4;
-  const scale = Math.max(4, Math.floor(320 / (q.size + quiet * 2)));
-  const px = (q.size + quiet * 2) * scale;
-  canvas.width = px;
-  canvas.height = px;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, px, px);
-  ctx.fillStyle = '#000000';
-  for (let y = 0; y < q.size; y++) {
-    for (let x = 0; x < q.size; x++) if (q.modules[y][x]) ctx.fillRect((x + quiet) * scale, (y + quiet) * scale, scale, scale);
-  }
-}
-function openInvite() {
-  const link = inviteLink();
-  $('#invite-link').value = link;
-  const qr = $('#invite-qr');
-  try {
-    drawQr(qr, link);
-    qr.hidden = false;
-    $('#invite-qr-cap').hidden = false;
-  } catch {
-    qr.hidden = true; // a very long address will not fit; the link buttons still work
-    $('#invite-qr-cap').hidden = true;
-  }
-  $('#dlg-invite').showModal();
-}
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast('Link copied');
-  } catch {
-    const box = $('#invite-link');
-    box.select();
-    toast('Press and hold the link, then tap Copy');
-  }
-}
 function copyPlanned() {
   const prev = shiftMonth(month, -1);
   let n = 0;
@@ -427,7 +359,10 @@ function wizIntro() {
       { class: 'wiz-stack' },
       h('p', { class: 'eyebrow', text: 'Welcome' }),
       h('h2', { class: 'wiz-title', text: `Let's set up ${APP_NAME}` }),
-      h('p', { class: 'wiz-lead', text: "We'll ask about each item one at a time: first what comes in, then what goes out. It takes about two minutes, and you can change anything later." }),
+      h('p', { class: 'wiz-lead', text: "We'll ask about each item one at a time: first what comes in, then what goes out. You can change anything later." }),
+      gamesOn()
+        ? h('p', { class: 'help', text: 'Every answer earns a quick puzzle: a mini sudoku, a word scramble or a mini crossword. You can skip any of them, or turn them off in the menu.' })
+        : null,
       h('button', { class: 'btn btn-primary btn-xl', type: 'button', text: "Let's go", onclick: () => go(1) }),
     ),
   };
@@ -484,10 +419,16 @@ function wizValue(s) {
     if (r.cents !== null && r.cents !== existing) setValue(s.id, wiz.month, s.field, r.cents);
     return true;
   };
+  // An answered question earns a puzzle; a blank one just moves on.
+  const next = () => {
+    if (!save()) return;
+    if (parseMoney(input.value).cents === null) return go(1);
+    reward(isPlan ? `“${cat.name}” is planned. Puzzle time!` : `“${cat.name}” is up to date. Puzzle time!`, () => go(1));
+  };
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (save()) go(1);
+      next();
     }
   });
   return {
@@ -505,7 +446,7 @@ function wizValue(s) {
         : null,
       panel,
       err,
-      h('button', { class: 'btn btn-primary btn-xl', type: 'button', text: 'Next', onclick: () => { if (save()) go(1); } }),
+      h('button', { class: 'btn btn-primary btn-xl', type: 'button', text: 'Next', onclick: next }),
       h(
         'div',
         { class: 'wiz-actions' },
@@ -596,11 +537,11 @@ function wizDone() {
     outR.b.textContent = fmt(t.expenseP);
     leftR.b.textContent = fmt(t.incomeP - t.expenseP);
   });
-  const buttons = [];
-  if (familyKey) {
-    buttons.push(h('button', { class: 'btn btn-primary btn-xl', type: 'button', text: 'Invite my family', onclick: () => { closeWizard(); openInvite(); } }));
-  }
-  buttons.push(h('button', { class: `btn ${familyKey ? 'btn-secondary' : 'btn-primary'} btn-xl`, type: 'button', text: 'Open my budget', onclick: closeWizard }));
+  const solved = Number(store.get('fb.solved')) || 0;
+  const buttons = [
+    h('button', { class: 'btn btn-primary btn-xl', type: 'button', text: 'Open my budget', onclick: closeWizard }),
+    h('button', { class: 'btn btn-secondary btn-xl', type: 'button', text: 'Send this budget to family', onclick: () => { closeWizard(); exportFlow(); } }),
+  ];
   return {
     el: h(
       'div',
@@ -608,6 +549,7 @@ function wizDone() {
       h('p', { class: 'eyebrow', text: 'All set' }),
       h('h2', { class: 'wiz-title', text: `${monthLabel(wiz.month)} is ready` }),
       h('div', { class: 'summary-box' }, inR.el, outR.el, leftR.el),
+      solved > 0 && gamesOn() ? h('p', { class: 'wiz-lead', text: `Puzzles solved so far: ${solved}` }) : null,
       ...buttons,
       h('button', { class: 'btn btn-ghost', type: 'button', text: 'Back', onclick: () => go(-1) }),
     ),
@@ -655,10 +597,10 @@ async function submitAdd() {
     $('#add-amt').focus();
   };
   const c = budget.cats.get(ctx.id);
-  if (!c || c.deleted) return fail('That item was removed by someone else.');
+  if (!c || c.deleted) return fail('That item was removed.');
   const r = parseMoney($('#add-amt').value);
   if (!r.ok || r.cents === null || r.cents <= 0) return fail('Type an amount above zero, like 12.50');
-  const cur = budget.get(ctx.id, ctx.month, 'a') ?? 0; // read now, so changes from family while this box was open are included
+  const cur = budget.get(ctx.id, ctx.month, 'a') ?? 0; // read now, in case the total changed while this box was open
   const next = cur + ctx.sign * r.cents;
   if (next < 0) return fail(`That is more than the ${fmt(cur)} recorded so far.`);
   if (next > 99_999_999_999) return fail('That number is too big.');
@@ -670,10 +612,9 @@ async function submitAdd() {
 }
 
 /* ------------------------------------------------------------------ app lock (PIN) */
-// With the lock on, the family key is stored only in encrypted form (wrapped by the PIN) and lives in memory while unlocked.
+// With the lock on, the budget key is stored only in encrypted form (wrapped by the PIN) and lives in memory while unlocked.
 const LOCK_AFTER_MS = 60_000; // lock again once the app has been out of sight this long
 let hiddenAt = 0;
-let pendingInvite = null; // an invite link that was opened while the app was locked
 let failedPins = 0;
 let lockedUntil = 0;
 
@@ -702,10 +643,11 @@ function showLock(message) {
 /** Forget the key and everything decrypted, and ask for the PIN again. Sealed data stays on the phone. */
 function lockNow() {
   if (!familyKey || !loadWrapped()) return;
-  sync?.stop();
-  sync = null;
+  book = null;
   vault = null;
   familyKey = null;
+  pendingPlan = null;
+  exportText = '';
   budget.reset();
   rows.i.clear();
   rows.e.clear();
@@ -714,16 +656,8 @@ function lockNow() {
   showLock();
 }
 
-/** What to open: the saved budget, the budget from an invite link, or the welcome screen. */
-async function start(invite, saved) {
-  if (invite && saved && invite !== saved) {
-    if (confirm(`Switch this phone to the ${APP_NAME} from this invite? Your current budget stays safe for everyone else.`)) {
-      leaveLocal();
-      return enter(invite, false);
-    }
-    return enter(saved, false);
-  }
-  if (invite && !saved) return enter(invite, false);
+/** What to open: the budget saved on this phone, or the welcome screen. */
+async function start(saved) {
   if (saved) return enter(saved, false);
   show('welcome');
 }
@@ -760,21 +694,16 @@ async function tryUnlock() {
   }
   failedPins = 0;
   err.hidden = true;
-  const invite = pendingInvite;
-  pendingInvite = null;
   try {
-    await start(invite, key);
+    await start(key);
   } catch (e) {
     say(`Could not open the budget: ${e.message}`);
   }
 }
 
 function forgotPin() {
-  if (!confirm('If you forgot your PIN, the only way back in is to remove this budget from this phone and join again with an invite link from someone in your family. Everyone else keeps their data.\n\nRemove it from this phone?')) return;
-  const invite = pendingInvite;
-  pendingInvite = null;
+  if (!confirm('A forgotten PIN cannot be recovered. The only way back in is to delete this budget from this phone.\n\nIf family has the budget on their phone, they can email you a budget file to bring it back.\n\nDelete it from this phone?')) return;
   leaveLocal();
-  if (invite) enter(invite, false).catch((e) => console.error(e));
 }
 
 /** Ask for a PIN in a box. Resolves with the PIN, or null if cancelled. `check` may return an error message to keep the box open. */
@@ -835,7 +764,7 @@ async function toggleLock() {
   if (!w) {
     const pin = await askPin({
       title: 'Choose a PIN',
-      text: 'Pick 4 to 8 numbers. You will type it each time the app opens. If you ever forget it, you can rejoin with an invite link from family.',
+      text: 'Pick 4 to 8 numbers. You will type it each time the app opens. A forgotten PIN cannot be recovered, so pick one you will remember.',
       confirm: true,
     });
     if (!pin) return;
@@ -859,99 +788,309 @@ async function toggleLock() {
   toast('App lock is off');
 }
 
-/* ------------------------------------------------------------------ new family key (to remove someone) */
-async function rotateKeyFlow() {
-  $('#dlg-menu').close();
-  if (!sync || !familyKey) return;
-  if (sync.status !== 'online' && sync.status !== 'idle') {
-    toast('Connect to the internet first, then try again.');
-    return;
-  }
-  if (!confirm('Make a new family key?\n\nUse this to remove someone: their old invite link stops working. Everyone you still want in will need the NEW link, which you will see next.\n\nIt works best when nobody else is editing right now.')) return;
-  const w = loadWrapped();
-  let pin = null;
-  if (w) {
-    pin = await askPin({
-      title: 'Confirm with your PIN',
-      text: 'Type your PIN to make a new key.',
-      check: async (p) => ((await unwrapKey(p, w)) ? null : 'That PIN is not right.'),
-    });
-    if (!pin) return;
-  }
+/* ------------------------------------------------------------------ sharing password */
+// Budget files are locked with a password the family agrees on. This phone remembers it (sealed with the budget key).
 
-  const oldKey = familyKey;
-  const oldSync = sync;
-  const prefs = { 'fb.size': store.get('fb.size'), 'fb.currency': store.get('fb.currency') };
-  const newKey = newFamilyKey();
-  const banner = $('#busy');
-  banner.textContent = 'Making a new key…';
-  banner.hidden = false;
-  document.body.classList.add('busy');
+/** Ask for the sharing password. Resolves with it, or null if cancelled. `check` may return an error message to keep the box open. */
+function askPassword({ title, text, hint = true, check = null }) {
+  return new Promise((resolve) => {
+    const dlg = $('#dlg-pw');
+    const form = $('#pw-form');
+    const input = $('#pw-input');
+    const err = $('#pw-error');
+    const go = $('#pw-go');
+    $('#pw-title').textContent = title;
+    $('#pw-text').textContent = text;
+    $('#pw-hint').hidden = !hint;
+    input.value = '';
+    err.hidden = true;
+    go.disabled = false;
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      form.removeEventListener('submit', onSubmit);
+      dlg.removeEventListener('close', onClose);
+      $('#pw-cancel').removeEventListener('click', onCancel);
+      if (dlg.open) dlg.close();
+      resolve(value);
+    };
+    const fail = (msg) => {
+      err.textContent = msg;
+      err.hidden = false;
+    };
+    async function onSubmit(e) {
+      e.preventDefault();
+      const pw = input.value;
+      if (!validPassword(pw)) return fail(`Use at least ${MIN_PASSWORD} letters or numbers.`);
+      if (check) {
+        go.disabled = true;
+        go.textContent = 'Checking…';
+        const problem = await check(pw);
+        go.disabled = false;
+        go.textContent = 'OK';
+        if (problem) return fail(problem);
+      }
+      finish(pw);
+    }
+    const onCancel = () => finish(null);
+    const onClose = () => finish(null);
+    form.addEventListener('submit', onSubmit);
+    dlg.addEventListener('close', onClose);
+    $('#pw-cancel').addEventListener('click', onCancel);
+    dlg.showModal();
+    input.focus();
+  });
+}
 
-  let moved;
+const NEW_PASSWORD_TEXT =
+  'This password locks the budget files you send. Your family types the same one to open them, so choose it together and tell each other in person or on the phone, not in the email with the file. This phone will remember it.';
+
+async function changeSharingPassword() {
+  if (!book) return;
+  const pw = await askPassword({ title: 'New sharing password', text: `${NEW_PASSWORD_TEXT} Files you sent before still open with the old one.` });
+  if (!pw || !book) return;
+  await book.setNote('sharepw', pw);
+  toast('Sharing password changed');
+}
+
+/* ------------------------------------------------------------------ send my budget (export) */
+const lastShared = () => Number(store.get('fb.shared')) || 0;
+const markShared = () => store.set('fb.shared', String(Date.now()));
+let exportText = ''; // the locked file that is ready to send
+
+async function exportFlow() {
+  if (!book) return;
+  await chain; // make sure the last edit is in
+  let pw = await book.getNote('sharepw');
+  if (!validPassword(pw)) {
+    pw = await askPassword({ title: 'Choose a sharing password', text: NEW_PASSWORD_TEXT });
+    if (!pw || !book) return;
+    await book.setNote('sharepw', pw);
+  }
+  busy('Locking your budget file…');
   try {
-    moved = await migrateTo({
-      budget,
-      oldSync,
-      newKey,
-      onProgress: (done, total) => {
-        banner.textContent = `Making a new key… ${done} of ${total}`;
-      },
-    });
+    exportText = await sealFile(pw, exportData(budget));
   } catch (e) {
     console.error(e);
-    if (!oldSync.running) await enter(oldKey, false).catch((e2) => console.error(e2)); // the old connection was stopped: bring it back
-    alert(`Nothing was changed. The new key could not be made: ${e.message}.`);
+    toast('Could not make the file. Please try again.');
     return;
   } finally {
-    banner.hidden = true;
-    document.body.classList.remove('busy');
+    busy('');
+  }
+  $('#ex-name').textContent = `The file is called ${fileName()}`;
+  $('#dlg-export').showModal();
+}
+
+function saveExportFile() {
+  const url = URL.createObjectURL(new Blob([exportText], { type: 'text/plain' }));
+  const a = h('a', { href: url, download: fileName() });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  markShared();
+  toast('Saved to Downloads. Attach it to an email.');
+}
+
+async function shareExportFile() {
+  if (!exportText) return;
+  let file = null;
+  try {
+    file = new File([exportText], fileName(), { type: 'text/plain' });
+  } catch {
+    /* very old browser */
+  }
+  if (file && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: `${APP_NAME} budget`,
+        text: `Here is my latest budget file. Open ${APP_NAME}, tap the menu, then "Bring in a budget file from family".`,
+      });
+      markShared();
+      toast('Budget file handed off');
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+    }
+  }
+  saveExportFile(); // no share sheet here (a computer, usually): save the file instead
+}
+
+async function copyExportText() {
+  try {
+    await navigator.clipboard.writeText(exportText);
+    markShared();
+    toast('Copied. Paste it into an email.');
+  } catch {
+    toast('Could not copy. Use "Save the file" instead.');
+  }
+}
+
+/* ------------------------------------------------------------------ bring in a budget file (import) */
+let pendingPlan = null; // changes shown in the preview, waiting for a yes
+
+function importFlow() {
+  $('#im-error').hidden = true;
+  $('#im-paste').value = '';
+  $('#im-file').value = '';
+  $('#im-title').textContent = book ? 'Bring in a budget file' : 'Open a budget file';
+  $('#im-text').textContent = book
+    ? 'Choose the budget file family emailed you (save the attachment to this phone first), or paste the text they sent. You will see what changes before anything is updated.'
+    : 'Choose the budget file family emailed you (save the attachment to this phone first), or paste the text they sent.';
+  $('#dlg-import').showModal();
+}
+
+const FIELD_NAME = { ip: 'Expected', ia: 'Received', ep: 'Planned', ea: 'Spent' };
+
+async function handleImportText(text) {
+  const err = $('#im-error');
+  const file = parseFile(text);
+  if (!file) {
+    err.textContent = `That is not an ${APP_NAME} budget file. Choose the file family sent you, or paste all of its text.`;
+    err.hidden = false;
+    return;
+  }
+  $('#dlg-import').close();
+
+  // Unlock it: try the password this phone remembers, then ask.
+  let data = null;
+  let typed = null;
+  const remembered = book ? await book.getNote('sharepw') : null;
+  if (validPassword(remembered)) {
+    busy('Opening the file…');
+    data = await openFile(remembered, file);
+    busy('');
+  }
+  if (!data) {
+    typed = await askPassword({
+      title: 'Sharing password',
+      text: 'Type the sharing password your family chose for budget files.',
+      hint: false,
+      check: async (p) => {
+        data = await openFile(p, file);
+        return data ? null : 'That password did not open the file. Check it with the person who sent it.';
+      },
+    });
+    if (!typed) return;
   }
 
-  // From here the old budget is gone, so never go back: always end up holding the new link.
+  let clean;
   try {
-    store.clearAll();
-    for (const [k, v] of Object.entries(prefs)) if (v) store.set(k, v);
-    store.set('fb.cache', moved.cacheJson); // keeps this phone working offline, and lets it re-upload if the server loses the data
-    store.set('fb.known', '1');
-    if (pin) store.set('fb.wrapped', JSON.stringify(await wrapKey(pin, newKey)));
-    await enter(newKey, false);
-    openInvite();
-    toast('New key made. Send the new link to your family.');
-  } catch (e) {
-    console.error(e);
-    window.prompt('Your family now has a new invite link. Copy it and keep it safe:', `${location.origin}${location.pathname}#k=${newKey}`);
+    clean = cleanImport(data);
+  } catch {
+    toast('That file could not be read.');
+    return;
   }
+
+  if (!book) {
+    // First time on this phone: the file becomes this phone's budget.
+    await enter(newFamilyKey(), false);
+    await book.setNote('sharepw', typed);
+    await applyPlan(planMerge(budget, clean, 0));
+    toast('Budget opened. It now lives on this phone.');
+    return;
+  }
+  if (typed && !validPassword(remembered)) await book.setNote('sharepw', typed);
+  showPreview(planMerge(budget, clean, lastShared()));
+}
+
+function showPreview(plan) {
+  if (plan.total === 0) {
+    toast(plan.kept ? 'Nothing newer in that file. Your budget is already up to date.' : 'Your budget already matches that file.');
+    return;
+  }
+  pendingPlan = plan;
+  const money = (v) => (v === null ? 'empty' : fmt(v));
+  const lines = [];
+  for (const c of plan.cats) {
+    if (c.change === 'added') lines.push(h('li', {}, h('b', { text: 'New item' }), h('span', { text: c.name })));
+    else if (c.change === 'removed') lines.push(h('li', {}, h('b', { text: 'Removed item' }), h('span', { text: c.name })));
+    else if (c.change === 'renamed') lines.push(h('li', {}, h('b', { text: 'Renamed' }), h('span', { text: `${c.was} → ${c.name}` })));
+  }
+  for (const v of plan.vals) {
+    lines.push(
+      h(
+        'li',
+        { class: v.both ? 'both' : '' },
+        h('b', { text: `${v.name} · ${FIELD_NAME[v.kind + v.f]}` }),
+        h('span', { class: 'muted', text: monthLabel(v.m) }),
+        h('span', { class: 'delta', text: `${money(v.from)} → ${money(v.to)}` }),
+        v.both ? h('span', { class: 'tag', text: 'You changed this too' }) : null,
+      ),
+    );
+  }
+  const MAX = 80;
+  const extra = lines.length - MAX;
+  $('#pv-list').replaceChildren(...lines.slice(0, MAX), extra > 0 ? h('li', { text: `…and ${extra} more` }) : '');
+  $('#pv-text').textContent = `This file has ${plan.total} change${plan.total === 1 ? '' : 's'} for your budget. Nothing is updated until you say so.`;
+  const notes = [];
+  if (plan.vals.some((v) => v.both)) notes.push('Amounts marked "You changed this too" were changed on both phones. The amount in the file is newer, so it will replace yours.');
+  if (plan.kept) notes.push(`${plan.kept} amount${plan.kept === 1 ? '' : 's'} in the file ${plan.kept === 1 ? 'is' : 'are'} older than yours and will be left alone.`);
+  $('#pv-note').textContent = notes.join(' ');
+  $('#pv-note').hidden = notes.length === 0;
+  $('#dlg-preview').showModal();
+}
+
+function applyPlan(plan) {
+  return enqueue(async () => {
+    if (!book || !vault) return;
+    const entries = [];
+    for (const c of plan.cats) {
+      budget.apply(c.id, c.payload);
+      entries.push([c.id, c.payload]);
+    }
+    for (const v of plan.vals) {
+      const rid = await recordId(vault, valLabel(v.c, v.m, v.f));
+      budget.apply(rid, v.payload);
+      entries.push([rid, v.payload]);
+    }
+    await book.putMany(entries);
+    markShared();
+    scheduleRender();
+  });
+}
+
+/* ------------------------------------------------------------------ reward puzzles */
+const gamesOn = () => store.get('fb.games') !== 'off';
+
+/** Which puzzle comes next: sudoku, then a word scramble, then a crossword, round and round. */
+function nextGame() {
+  let n = Number(store.get('fb.gameN'));
+  if (!Number.isInteger(n) || n < 0) n = Math.floor(Math.random() * 300) * GAME_KINDS.length; // start somewhere different on every phone
+  store.set('fb.gameN', String(n + 1));
+  return { kind: GAME_KINDS[n % GAME_KINDS.length], n: Math.floor(n / GAME_KINDS.length) };
+}
+function countSolved() {
+  const total = (Number(store.get('fb.solved')) || 0) + 1;
+  store.set('fb.solved', String(total));
+  return total;
+}
+
+/** During guided setup: show a puzzle as the reward for an answer, then carry on. */
+function reward(praise, then) {
+  if (!gamesOn()) return then();
+  $('#wiz-step').textContent = 'Puzzle break';
+  mountGame($('#wiz-body'), { ...nextGame(), praise, onSolved: countSolved, onDone: then });
+  window.scrollTo(0, 0);
+  $('#wizard').scrollTop = 0;
+}
+
+/** From the menu: puzzles just for fun. */
+function playPuzzle() {
+  mountGame($('#game-host'), { ...nextGame(), doneLabel: 'Another puzzle', skipLabel: 'Try a different puzzle', onSolved: countSolved, onDone: playPuzzle });
+  if (!$('#dlg-game').open) $('#dlg-game').showModal();
 }
 
 /* ------------------------------------------------------------------ wiring */
 function wire() {
-  $('#btn-new').addEventListener('click', async () => {
-    try {
-      await enter(newFamilyKey(), true);
-    } catch (e) {
-      $('#welcome-error').textContent = `Could not start: ${e.message}`;
-      $('#welcome-error').hidden = false;
-    }
-  });
-
-  $('#join-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const key = keyFromText($('#join-input').value);
-    const err = $('#welcome-error');
-    if (!key) {
-      err.textContent = "That doesn't look like an invite link. Paste the whole link you were sent.";
-      err.hidden = false;
-      return;
-    }
-    err.hidden = true;
-    try {
-      await enter(key, false);
-    } catch (ex) {
-      err.textContent = `Could not join: ${ex.message}`;
-      err.hidden = false;
-    }
-  });
+  const startError = (e) => {
+    $('#welcome-error').textContent = `Could not start: ${e.message}`;
+    $('#welcome-error').hidden = false;
+  };
+  $('#btn-new').addEventListener('click', () => enter(newFamilyKey(), true).catch(startError));
+  $('#btn-open').addEventListener('click', importFlow);
 
   $('#prev-month').addEventListener('click', () => changeMonth(-1));
   $('#next-month').addEventListener('click', () => changeMonth(1));
@@ -974,24 +1113,29 @@ function wire() {
   $('#cat-delete').addEventListener('click', async () => {
     const c = catEdit?.id && budget.cats.get(catEdit.id);
     if (!c) return;
-    if (!confirm(`Delete "${c.name}"? It will disappear for everyone in the family.`)) return;
+    if (!confirm(`Delete "${c.name}"? Its amounts will no longer be counted.`)) return;
     await putRecord(c.id, catPayload(c.name, c.kind, c.order, true));
     $('#dlg-cat').close();
   });
 
   // Menu
+  const menu = $('#dlg-menu');
+  const fromMenu = (id, fn) => $(id).addEventListener('click', () => { menu.close(); fn(); });
   $('#btn-menu').addEventListener('click', () => {
     $('#m-currency').value = currency;
     $('#m-size').checked = store.get('fb.size') === 'xl';
+    $('#m-games').checked = gamesOn();
     $('#m-lock').textContent = loadWrapped() ? 'Turn off app lock (PIN)' : 'Turn on app lock (PIN)';
-    $('#dlg-menu').showModal();
+    menu.showModal();
   });
-  $('#m-close').addEventListener('click', () => $('#dlg-menu').close());
-  $('#m-invite').addEventListener('click', () => { $('#dlg-menu').close(); openInvite(); });
-  $('#m-setup').addEventListener('click', () => { $('#dlg-menu').close(); openWizard(false); });
-  $('#m-copyplan').addEventListener('click', () => { $('#dlg-menu').close(); copyPlanned(); });
-  $('#m-lock').addEventListener('click', () => { $('#dlg-menu').close(); toggleLock(); });
-  $('#m-rotate').addEventListener('click', rotateKeyFlow);
+  $('#m-close').addEventListener('click', () => menu.close());
+  fromMenu('#m-export', exportFlow);
+  fromMenu('#m-import', importFlow);
+  fromMenu('#m-setup', () => openWizard(false));
+  fromMenu('#m-copyplan', copyPlanned);
+  fromMenu('#m-game', playPuzzle);
+  fromMenu('#m-lock', toggleLock);
+  fromMenu('#m-sharepw', changeSharingPassword);
   $('#m-currency').addEventListener('change', (e) => {
     currency = e.target.value;
     store.set('fb.currency', currency);
@@ -1001,19 +1145,10 @@ function wire() {
     store.set('fb.size', e.target.checked ? 'xl' : 'l');
     applySize();
   });
-  $('#m-wipe').addEventListener('click', async () => {
-    if (!confirm('Delete ALL budget data from the server for everyone? Phones will be signed out. This cannot be undone.')) return;
-    try {
-      await sync.deleteRoom();
-      $('#dlg-menu').close();
-      leaveLocal('The budget was deleted from the server.');
-    } catch {
-      toast("Couldn't reach the server. Try again when you're online.");
-    }
-  });
+  $('#m-games').addEventListener('change', (e) => store.set('fb.games', e.target.checked ? 'on' : 'off'));
   $('#m-leave').addEventListener('click', () => {
-    if (!confirm('Remove this budget from this phone? You will need the invite link to come back.')) return;
-    $('#dlg-menu').close();
+    if (!confirm('Delete this budget from this phone?\n\nIt is not saved anywhere else. Unless family has it on their phone, or you kept a budget file, it will be gone for good.')) return;
+    menu.close();
     leaveLocal();
   });
 
@@ -1040,22 +1175,50 @@ function wire() {
   });
   $('#lock-forgot').addEventListener('click', forgotPin);
 
-  // Invite
-  $('#invite-close').addEventListener('click', () => $('#dlg-invite').close());
-  $('#btn-copy').addEventListener('click', () => copyText(inviteLink()));
-  $('#invite-link').addEventListener('focus', (e) => e.target.select());
-  $('#btn-share').addEventListener('click', async () => {
-    const url = inviteLink();
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: APP_NAME, text: `Join our family budget, ${APP_NAME}:`, url });
-        return;
-      } catch (e) {
-        if (e.name === 'AbortError') return;
-      }
+  // Send my budget
+  $('#ex-share').addEventListener('click', shareExportFile);
+  $('#ex-save').addEventListener('click', saveExportFile);
+  $('#ex-copy').addEventListener('click', copyExportText);
+  $('#ex-close').addEventListener('click', () => $('#dlg-export').close());
+
+  // Bring in a budget file
+  $('#im-choose').addEventListener('click', () => $('#im-file').click());
+  $('#im-file').addEventListener('change', async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 20_000_000) {
+      $('#im-error').textContent = 'That file is too big to be a budget file.';
+      $('#im-error').hidden = false;
+      return;
     }
-    copyText(url);
+    handleImportText(await f.text()).catch((ex) => {
+      console.error(ex);
+      toast('That file could not be read.');
+    });
   });
+  $('#im-read').addEventListener('click', () => {
+    handleImportText($('#im-paste').value).catch((ex) => {
+      console.error(ex);
+      toast('That text could not be read.');
+    });
+  });
+  $('#im-cancel').addEventListener('click', () => $('#dlg-import').close());
+  $('#pv-go').addEventListener('click', async () => {
+    const plan = pendingPlan;
+    pendingPlan = null;
+    $('#dlg-preview').close();
+    if (!plan || !book) return;
+    await applyPlan(plan);
+    toast(`Budget updated: ${plan.total} change${plan.total === 1 ? '' : 's'}`);
+  });
+  $('#pv-cancel').addEventListener('click', () => $('#dlg-preview').close());
+  $('#dlg-preview').addEventListener('close', () => {
+    pendingPlan = null;
+  });
+
+  // Puzzles
+  $('#game-close').addEventListener('click', () => $('#dlg-game').close());
+  $('#dlg-game').addEventListener('close', () => $('#game-host').replaceChildren());
 
   // Wizard
   $('#wiz-exit').addEventListener('click', closeWizard);
@@ -1067,8 +1230,7 @@ function wire() {
     });
   }
 
-  // Stay in sync when the phone wakes up or the network comes back
-  window.addEventListener('online', () => sync?.kick());
+  // The PIN lock asks again after a minute out of sight
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       hiddenAt = Date.now();
@@ -1076,8 +1238,7 @@ function wire() {
     }
     const away = hiddenAt ? Date.now() - hiddenAt : 0;
     hiddenAt = 0;
-    if (familyKey && away > LOCK_AFTER_MS && loadWrapped()) lockNow(); // the PIN lock asks again after a minute away
-    else sync?.kickIfStale();
+    if (familyKey && away > LOCK_AFTER_MS && loadWrapped()) lockNow();
   });
 }
 
@@ -1087,20 +1248,17 @@ async function boot() {
     show('insecure');
     return;
   }
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
   wire();
-
-  const invite = keyFromText(location.hash.slice(1));
-  if (location.hash) history.replaceState(null, '', location.pathname + location.search); // keep the key out of the address bar
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search); // old invite links carried a key here: drop it
 
   if (loadWrapped()) {
     // The PIN lock is on: the key is not on the phone in the clear, so ask for the PIN first.
     store.del('fb.key');
-    pendingInvite = invite;
     showLock();
     return;
   }
-  return start(invite, store.get('fb.key'));
+  return start(store.get('fb.key'));
 }
 
 boot().catch((e) => {
