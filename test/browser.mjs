@@ -29,9 +29,18 @@ const errors = [];
 let passed = 0;
 const ok = (name) => { passed++; console.log('  PASS ', name); };
 
-async function newPhone(name, opts = {}) {
+// `installed: true` (the default) makes the page believe it was opened from the installed app's icon: the question
+// "is this a browser tab?" is answered no, which is what Android answers for an installed app. Chrome's test tools
+// cannot switch a page into real installed mode, so that one answer is simulated here. `installed: false` is a plain tab.
+async function newPhone(name, { installed = true, ...opts } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 800 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, acceptDownloads: true, ...opts });
   const page = await ctx.newPage();
+  if (installed) {
+    await page.addInitScript(() => {
+      const real = window.matchMedia.bind(window);
+      window.matchMedia = (q) => (/display-mode:\s*browser/.test(q) ? { matches: false, media: q, addEventListener() {}, removeEventListener() {} } : real(q));
+    });
+  }
   page.on('console', (m) => { if (m.type() === 'error') errors.push(`${name}: ${m.text()}`); });
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
   page.on('request', (r) => requests.push({ url: r.url(), method: r.method() }));
@@ -132,6 +141,17 @@ async function addSpending(p, name, amt) {
 }
 
 try {
+  /* ---------------- a browser tab only gets the install page ---------------- */
+  const T = await newPhone('tab', { installed: false });
+  await T.page.goto(URL0);
+  await T.page.locator('#install:not([hidden])').waitFor();
+  assert.match(await T.page.textContent('#install'), /only installs the app/);
+  for (const id of ['welcome', 'lock', 'budget']) assert.equal(await T.page.locator(`#${id}`).isVisible(), false, `${id} is showing in a browser tab`);
+  assert.equal(await T.page.locator('#btn-new').isVisible(), false);
+  await noOverflow(T, 'install page');
+  await shot(T, '00-install-page');
+  ok('opened in a browser tab, the address shows only the install page');
+
   /* ---------------- phone A: set up with puzzles ---------------- */
   const A = await newPhone('A');
   await A.page.goto(URL0);
@@ -420,6 +440,17 @@ try {
   await D.page.locator('#wiz-body .game').waitFor();
   assert.equal(await D.page.locator('#wiz-body .game-skip').count(), 0);
   ok('closing the app part-way through first-time setup picks up at the next unanswered question, puzzles still required');
+
+  /* ---------------- the same phone, opened in the browser instead of the app ---------------- */
+  const tab = await A.ctx.newPage(); // same storage as phone A, but a plain tab
+  tab.on('pageerror', (e) => errors.push(`A-tab: ${e.message}`));
+  await tab.goto(URL0);
+  await tab.locator('#install:not([hidden])').waitFor();
+  assert.equal(await tab.locator('#budget').isVisible(), false);
+  assert.equal(await tab.locator('#lock').isVisible(), false);
+  assert.equal(await tab.locator('.name-text').count(), 0); // none of the budget is put on the page
+  await tab.close();
+  ok('a phone that already has a budget still gets only the install page in a browser tab');
 
   /* ---------------- nothing left the phone ---------------- */
   const bad = requests.filter((r) => !r.url.startsWith(URL0) && !r.url.startsWith('blob:') || r.method !== 'GET');

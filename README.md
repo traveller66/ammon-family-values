@@ -46,11 +46,13 @@ A web app has to be opened from an https address once to be installed. GitHub Pa
 1. Push this repository to GitHub.
 2. Repo **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `main`, folder: `/docs` → Save**.
 3. After a minute the address is `https://<your-github-name>.github.io/ammon-family-values/`.
-4. On each phone: open that address in **Chrome** → **⋮ → Install app** (or **Add to Home screen**).
+4. On each phone: open that address in **Chrome** → **Install the app** (or **⋮ → Install app**).
+
+**The address only installs the app.** Opened in a browser tab it shows an install page and nothing else; the budget opens only from the installed app's icon. This keeps the budget out of ordinary browser tabs (on your own phone, a tab shares storage with the installed app). It is a convenience, not a lock: the app's files are public, anyone can install their own empty copy, and what protects your numbers is that they are stored only on your phone, plus the PIN. If the home-screen icon ever shows the install page, it was added as a plain shortcut: remove it and use **Install app**.
 
 On GitHub's free plan, Pages needs the repository to be **public**. That exposes this code, not your budget. This Pages setup has not been run yet.
 
-To try it on a computer instead: `npx serve docs` (or any static file server) and open the `localhost` address it prints.
+To try it on a computer instead: `npx serve docs` (or any static file server), open the `localhost` address it prints in Chrome, and install it from the address bar. A plain tab shows only the install page.
 
 ## Using it
 
@@ -65,8 +67,8 @@ To try it on a computer instead: `npx serve docs` (or any static file server) an
 ## What was and wasn't verified
 
 - **Verified (automated, `npm test`, 20 checks on the real app code):** saving and reopening; that storage holds no readable labels, amounts or key; that data from the earlier server-based version still opens; that the app's code has no network calls; that every file is in the offline list and every element the code uses exists; locking and opening budget files (wrong password, altered file, wrong kind of file, text re-wrapped by email); a second phone opening a file; newer-wins merging both ways; the both-changed warning; renames, removals and cleared amounts; separately set-up phones lining up by item name; the PIN lock; the sealed sharing password; setup help text; 500 generated sudokus each having exactly one answer; every scramble word; every crossword grid.
-- **Verified (headless Chrome at phone size, two separate "phones", 16 checks, `test/browser.mjs`):** first-time setup one question at a time with the explanation showing on every question; all three puzzles solved by tapping, wrong moves showing the warning, no skip offered, hints and "a different puzzle" finishing a puzzle; "We don't have this one"; setup resuming after the app is closed part-way; puzzles skippable and switchable once setup is done; the (i) on main-screen items; sending a file; the second phone opening it (wrong password and wrong file refused); an update coming back with the preview, Cancel, and Update; pasting the file as text; puzzles from the menu; PIN lock; reload and use with the network off; small-phone dark mode with extra-large text; no sideways overflow on any screen; no console errors; and that the only requests made were for the app's own files.
-- **Not verified:** a real Android phone. In particular: installing it, Android's share sheet handing the file to an email app (the test used "Save the file"), opening an attachment from an email app, and the GitHub Pages setup.
+- **Verified (headless Chrome at phone size, two separate "phones", 18 checks, `test/browser.mjs`):** a browser tab getting only the install page, including on a phone that already has a budget; first-time setup one question at a time with the explanation showing on every question; all three puzzles solved by tapping, wrong moves showing the warning, no skip offered, hints and "a different puzzle" finishing a puzzle; "We don't have this one"; setup resuming after the app is closed part-way; puzzles skippable and switchable once setup is done; the (i) on main-screen items; sending a file; the second phone opening it (wrong password and wrong file refused); an update coming back with the preview, Cancel, and Update; pasting the file as text; puzzles from the menu; PIN lock; reload and use with the network off; small-phone dark mode with extra-large text; no sideways overflow on any screen; no console errors; and that the only requests made were for the app's own files.
+- **Not verified:** a real Android phone. In particular: installing it, the installed app being recognised as installed (the browser run simulates that answer), Android's share sheet handing the file to an email app (the test used "Save the file"), opening an attachment from an email app, and the GitHub Pages setup.
 
 ## Known limits
 

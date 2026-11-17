@@ -255,6 +255,7 @@ dialog::backdrop { background: rgba(30, 15, 5, 0.55); }
 .info-btn.sm { width: 2.2rem; height: 2.2rem; font-size: 1.15rem; align-self: center; }
 .item > .help { margin-bottom: 0.8rem; font-size: 0.98rem; }
 .foot { margin-top: 0.8rem; }
+#install .hint { margin-top: 1rem; font-size: 1rem; }
 
 /* Busy banner while a budget file is being locked or opened */
 #busy {

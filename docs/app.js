@@ -70,7 +70,7 @@ function makeHelp(info, { always = false, id }) {
 }
 
 function show(name) {
-  for (const id of ['insecure', 'welcome', 'lock', 'budget']) $(`#${id}`).hidden = id !== name;
+  for (const id of ['insecure', 'install', 'welcome', 'lock', 'budget']) $(`#${id}`).hidden = id !== name;
 }
 
 /* ------------------------------------------------------------------ state */
@@ -1305,6 +1305,45 @@ function wire() {
   });
 }
 
+/* ------------------------------------------------------------------ install-only page */
+// In a browser tab this address only installs the app. The budget opens only from the installed app's own icon.
+// This is a convenience, not a lock: what protects the budget is that it is stored on the phone, plus the PIN.
+// A browser that cannot say how the page was opened is treated as installed, so nobody is shut out of their budget.
+const inBrowserTab = () => {
+  try {
+    return window.matchMedia('(display-mode: browser)').matches && navigator.standalone !== true;
+  } catch {
+    return false;
+  }
+};
+let installPrompt = null; // Chrome hands this over when it is ready to install the app
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  const btn = document.querySelector('#btn-install');
+  if (btn) btn.hidden = false;
+});
+
+function showInstallPage() {
+  show('install');
+  const btn = $('#btn-install');
+  const note = $('#install-note');
+  btn.hidden = !installPrompt;
+  btn.addEventListener('click', async () => {
+    if (!installPrompt) return;
+    const prompt = installPrompt;
+    installPrompt = null;
+    btn.hidden = true;
+    prompt.prompt();
+    const choice = await prompt.userChoice.catch(() => null);
+    if (choice?.outcome !== 'accepted') note.textContent = 'Not installed. To try again, tap the ⋮ menu in Chrome, then "Install app" or "Add to Home screen".';
+  });
+  window.addEventListener('appinstalled', () => {
+    btn.hidden = true;
+    note.textContent = `Installed. Close this page and open ${APP_NAME} from your home screen.`;
+  });
+}
+
 async function boot() {
   applySize();
   if (!window.isSecureContext || !globalThis.crypto?.subtle) {
@@ -1312,6 +1351,10 @@ async function boot() {
     return;
   }
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  if (inBrowserTab()) {
+    showInstallPage(); // nothing else is started: no budget is read or shown in a browser tab
+    return;
+  }
   wire();
   if (location.hash) history.replaceState(null, '', location.pathname + location.search); // old invite links carried a key here: drop it
 
