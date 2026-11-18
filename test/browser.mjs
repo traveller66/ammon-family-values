@@ -58,46 +58,106 @@ async function solveGame(p) {
   const kind = await page.locator('#wiz-body .game, #game-host .game').first().getAttribute('data-game');
   const root = page.locator(`.game[data-game="${kind}"]`);
   if (kind === 'sudoku') {
-    const grid = await root.locator('.sudoku .sq').evaluateAll((els) => els.map((e) => Number(e.textContent) || 0));
-    const g = [0, 1, 2, 3].map((r) => grid.slice(r * 4, r * 4 + 4));
-    const okAt = (r, c, v) => { for (let i = 0; i < 4; i++) { if (g[r][i] === v || g[i][c] === v) return false; } const br = r - (r % 2), bc = c - (c % 2); for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) if (g[br + i][bc + j] === v) return false; return true; };
-    const solve = () => { for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) { if (g[r][c]) continue; for (let v = 1; v <= 4; v++) { if (okAt(r, c, v)) { g[r][c] = v; if (solve()) return true; g[r][c] = 0; } } return false; } return true; };
+    // Squares are drawn box by box; each one's label says its row and column.
+    const sq = root.locator('.sudoku9 .sq');
+    const read = await sq.evaluateAll((els) => els.map((e) => { const m = e.getAttribute('aria-label').match(/Row (\d), column (\d): (\d|empty)/); return [Number(m[1]) - 1, Number(m[2]) - 1, Number(m[3]) || 0]; }));
+    assert.equal(read.length, 81);
+    const g = Array.from({ length: 9 }, () => Array(9).fill(0));
+    const domIndex = Array.from({ length: 9 }, () => Array(9).fill(-1));
+    read.forEach(([r, c, v], i) => { g[r][c] = v; domIndex[r][c] = i; });
+    const givens = g.map((row) => [...row]);
+    const okAt = (r, c, v) => { for (let i = 0; i < 9; i++) { if (g[r][i] === v || g[i][c] === v) return false; } const br = r - (r % 3), bc = c - (c % 3); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (g[br + i][bc + j] === v) return false; return true; };
+    const solve = () => {
+      let best = null;
+      for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+        if (g[r][c]) continue;
+        const opts = [1, 2, 3, 4, 5, 6, 7, 8, 9].filter((v) => okAt(r, c, v));
+        if (!best || opts.length < best.opts.length) best = { r, c, opts };
+      }
+      if (!best) return true;
+      for (const v of best.opts) { g[best.r][best.c] = v; if (solve()) return true; }
+      g[best.r][best.c] = 0;
+      return false;
+    };
     assert.ok(solve());
-    // first make a deliberate mistake to see the red warning
-    const firstEmpty = grid.findIndex((v) => !v);
-    const r0 = firstEmpty >> 2;
-    const wrong = [1, 2, 3, 4].find((v) => grid.slice(r0 * 4, r0 * 4 + 4).includes(v));
-    await root.locator('.sudoku .sq').nth(firstEmpty).click();
-    await root.locator('.keys .key', { hasText: String(wrong) }).first().click();
+    const empties = [];
+    for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) empties.push([r, c]);
+    // first a deliberate mistake: a number already in that row
+    const [r0, c0] = empties[0];
+    const wrong = givens[r0].find((v) => v);
+    await sq.nth(domIndex[r0][c0]).click();
+    await root.locator('.keys .key', { hasText: new RegExp(`^${wrong}$`) }).click();
     assert.ok((await root.locator('.sq.bad').count()) >= 1, 'no red square after a wrong number');
     assert.match(await root.locator('.game-status').textContent(), /repeated/);
-    for (let i = 0; i < 16; i++) {
-      if (grid[i]) continue;
-      await root.locator('.sudoku .sq').nth(i).click();
-      await root.locator('.keys .key', { hasText: String(g[i >> 2][i & 3]) }).first().click();
+    // notes: pencil marks go in small, and a real number replaces them
+    await root.locator('.key-note').click();
+    const [r1, c1] = empties[1];
+    await sq.nth(domIndex[r1][c1]).click();
+    await root.locator('.keys .key', { hasText: /^1$/ }).click();
+    await root.locator('.keys .key', { hasText: /^2$/ }).click();
+    assert.match(await sq.nth(domIndex[r1][c1]).getAttribute('aria-label'), /notes 1 2/);
+    await root.locator('.key-note').click();
+    for (const [r, c] of empties) {
+      await sq.nth(domIndex[r][c]).click();
+      await root.locator('.keys .key', { hasText: new RegExp(`^${g[r][c]}$`) }).click();
     }
   } else if (kind === 'scramble') {
-    const tiles = await root.locator('.tiles .tile').evaluateAll((els) => els.map((e) => e.textContent));
-    const word = await page.evaluate(async (t) => { const m = await import('./puzzles.js'); return m.SCRAMBLE_WORDS.map((w) => w[0]).find((w) => w.split('').sort().join('') === [...t].sort().join('')); }, tiles);
-    assert.ok(word, 'scramble word not in list');
-    // wrong first: tap tiles in the order shown (it is scrambled, so it is wrong)
-    for (let i = 0; i < tiles.length; i++) await root.locator('.tiles .tile').nth(i).click();
-    assert.match(await root.locator('.game-status').textContent(), /Not quite/);
-    await root.locator('.chip', { hasText: 'Start over' }).click();
-    const used = new Set();
-    for (const ch of word) {
-      const i = tiles.findIndex((t, k) => t === ch && !used.has(k));
-      used.add(i);
-      await root.locator('.tiles .tile').nth(i).click();
+    const answers = await page.evaluate(async () => (await import('./puzzles.js')).SCRAMBLE_WORDS.map((w) => w[0]));
+    for (let round = 0; round < 3; round++) {
+      assert.match(await root.locator('.scr-progress').textContent(), new RegExp(`Word ${round + 1} of 3`));
+      const tiles = await root.locator('.tiles .tile').evaluateAll((els) => els.map((e) => e.textContent));
+      const answer = answers.find((w) => w.replace(/ /g, '').split('').sort().join('') === [...tiles].sort().join(''));
+      assert.ok(answer, 'scramble word not in list');
+      if (round === 0) {
+        // wrong first: tap tiles in the order shown (it is scrambled, so it is wrong)
+        for (let i = 0; i < tiles.length; i++) await root.locator('.tiles .tile').nth(i).click();
+        assert.match(await root.locator('.game-status').textContent(), /Not quite/);
+        await root.locator('.chip', { hasText: 'Start over' }).click();
+      }
+      const used = new Set();
+      for (const ch of answer.replace(/ /g, '')) {
+        const i = tiles.findIndex((t, k) => t === ch && !used.has(k));
+        used.add(i);
+        await root.locator('.tiles .tile').nth(i).click();
+      }
+      if (round < 2) await root.locator('.scr-done li').nth(round).waitFor();
     }
   } else {
-    const clues = await root.locator('.clues li').evaluateAll((els) => els.map((e) => e.textContent));
-    const cells = await page.evaluate(async (clueText) => { const m = await import('./puzzles.js'); const words = m.CROSSWORDS.find((ws) => ws.every((w) => clueText.some((c) => c.includes(w.clue)))); const x = m.layCrossword(words); return [...x.cells.entries()].sort((a, b) => { const [ar, ac] = a[0].split(',').map(Number); const [br, bc] = b[0].split(',').map(Number); return ar - br || ac - bc; }).map((e) => e[1]); }, clues);
-    const sq = root.locator('.xword .sq');
-    assert.equal(await sq.count(), cells.length);
-    for (let i = 0; i < cells.length; i++) {
-      await sq.nth(i).click();
-      await root.locator('.keys .key', { hasText: new RegExp(`^${cells[i]}$`) }).click();
+    // Each clue in the list is unique, so it says which word goes there. Tap the clue, then fill its squares.
+    const list = await page.evaluate(async () => (await import('./puzzles.js')).CROSSWORD_WORDS);
+    const byClue = new Map(list.map(([w, c]) => [c, w]));
+    const clueButtons = root.locator('.xlists .clues li button');
+    const n = await clueButtons.count();
+    assert.ok(n >= 16, `only ${n} clues`);
+    let firstWrong = true;
+    for (let i = 0; i < n; i++) {
+      if (await root.locator('.game-win').count()) break; // crossing words can finish the grid before the last clue
+      const text = await clueButtons.nth(i).locator('span').textContent();
+      const word = byClue.get(text.replace(/ \(\d+\)$/, ''));
+      assert.ok(word, `unknown clue ${text}`);
+      await clueButtons.nth(i).click();
+      const squares = root.locator('.xword .sq.inword');
+      assert.equal(await squares.count(), word.length);
+      for (let j = 0; j < word.length; j++) {
+        if (await root.locator('.game-win').count()) break;
+        const s = squares.nth(j);
+        const cls = await s.getAttribute('class');
+        if (!/\bsel\b/.test(cls)) await s.click();
+        let letter = word[j];
+        if (firstWrong) { letter = letter === 'Q' ? 'Z' : 'Q'; } // one wrong letter, to see "Check my answers" find it
+        await root.locator('.qwerty .key', { hasText: new RegExp(`^${letter}$`) }).click();
+        if (firstWrong) {
+          firstWrong = false;
+          await root.locator('.game-check').click();
+          assert.equal(await root.locator('.xword .sq.bad').count(), 1);
+          assert.match(await root.locator('.game-status').textContent(), /1 letter is wrong/);
+          await root.locator('.xword .sq.bad').click();
+          if (!/\bsel\b/.test(await root.locator('.xword .sq.bad').getAttribute('class'))) await root.locator('.xword .sq.bad').click();
+          await root.locator('.qwerty .key', { hasText: new RegExp(`^${word[j]}$`) }).click();
+          assert.equal(await root.locator('.xword .sq.bad').count(), 0);
+          await clueButtons.nth(i).click();
+        }
+      }
     }
   }
   await root.locator('.game-win').waitFor();
@@ -105,7 +165,7 @@ async function solveGame(p) {
 }
 
 async function hintThrough(p) {
-  for (let i = 0; i < 40 && !(await p.page.locator('.game-win').count()); i++) await p.page.locator('.game-hint').click();
+  for (let i = 0; i < 200 && !(await p.page.locator('.game-win').count()); i++) await p.page.locator('.game-hint').click();
   await p.page.locator('.game-win').waitFor();
 }
 

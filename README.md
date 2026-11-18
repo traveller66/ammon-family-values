@@ -4,7 +4,7 @@ A family budget that installs on Android like an app and lives **only on your ow
 
 - **What it is:** an installable web app (PWA): plain HTML/CSS/JS in `docs/`, no build step, nothing to `npm install`.
 - **What it talks to:** nothing. The app's code contains no network calls. After the first visit it runs with no internet.
-- **Fun part:** first-time setup asks for one number at a time, and every answer is followed by a quick puzzle (mini sudoku, word scramble, mini crossword) that has to be solved to move on. After that, puzzles are there whenever you want one and never required.
+- **Fun part:** first-time setup asks for one number at a time, and every answer is followed by a puzzle (hard 9 × 9 sudoku, three-word scramble, big crossword) that has to be solved to move on. After that, puzzles are there whenever you want one and never required.
 
 ## What is stored, and where
 
@@ -32,12 +32,16 @@ A saved budget file is also your **backup**: keep one somewhere safe.
 
 - **First-time setup** asks one small question per screen: each income on its own (Paycheck 1, Paycheck 2, Other income), then each bill on its own (Rent or mortgage, Electricity, Water and gas, Phone and internet, and so on). The starting list is `DEFAULT_CATEGORIES` in `docs/model.js`.
 - **The explanation is always on the screen:** an **"I'm asking for"** line (for example "Net income: the first paycheck, after taxes") and a short paragraph saying what to count and what to leave out. The wording is `HELP` in `docs/model.js`.
-- **Every answer is followed by a puzzle that must be solved to move on**, rotating sudoku → word scramble → crossword. There is no skip. So nobody gets stuck: **Give me a hint** puts one right answer in place (as many times as needed), and **Try a different puzzle** swaps it for another one.
+- **Every answer is followed by a puzzle that must be solved to move on**, rotating sudoku → word scramble → crossword. There is no skip. So nobody gets stuck: **Give me a hint** puts one right answer in place (as many times as needed), **Check my answers** marks wrong squares in red (sudoku and crossword), and **Try a different puzzle** swaps it for another one.
+- **The puzzles are big and hard:**
+  - **Sudoku:** full 9 × 9, about 23–27 numbers given, exactly one answer, and always needing at least one technique beyond the easy "only number that fits" moves (locked candidates, pairs or triples), but never guessing. **Notes** pencils in small numbers; placing a number clears it from the notes around it. A repeated number shows in red right away.
+  - **Word scramble:** three long words or two-word phrases in a row (8–16 letters, like COMPOUND INTEREST or REIMBURSEMENT), with the letters of both words mixed together.
+  - **Crossword:** a fresh grid every time, about 17–23 interlocking words on a grid up to 13 tall and 11 wide, with trickier clues. Full keyboard, a clue bar with ‹ › to move between clues, tap a square twice to switch across/down, tap any clue to jump to it. A hardware keyboard works too.
 - A question left blank (**Skip for now**) has no puzzle. **We don't have this one** removes the item from the budget.
 - Closing the app part-way through picks setup up again at the next unanswered question.
 - **After first-time setup, puzzles are never required.** **Play a puzzle** is on the main screen and in the menu. If you run **Guided setup for this month** again, its puzzles can be skipped, and Menu → **Puzzles when I redo guided setup** turns them off.
 - A phone that got its budget from a budget file never goes through first-time setup, so it is never required to play.
-- Word lists and crossword grids are in `docs/puzzles.js` (`SCRAMBLE_WORDS`, `CROSSWORDS`) and are easy to add to. `npm test` checks every crossword's words cross correctly.
+- Word lists are in `docs/puzzles.js` (`SCRAMBLE_WORDS`, and `CROSSWORD_WORDS` for the crossword's words and clues) and are easy to add to: crossword grids are built from that list automatically. `npm test` checks that clues never give away their answers and that 150 freshly built grids fit a phone, link up, and form no stray words.
 
 ## Getting it onto the phones (free, no server)
 
@@ -66,8 +70,8 @@ To try it on a computer instead: `npx serve docs` (or any static file server), o
 
 ## What was and wasn't verified
 
-- **Verified (automated, `npm test`, 20 checks on the real app code):** saving and reopening; that storage holds no readable labels, amounts or key; that data from the earlier server-based version still opens; that the app's code has no network calls; that every file is in the offline list and every element the code uses exists; locking and opening budget files (wrong password, altered file, wrong kind of file, text re-wrapped by email); a second phone opening a file; newer-wins merging both ways; the both-changed warning; renames, removals and cleared amounts; separately set-up phones lining up by item name; the PIN lock; the sealed sharing password; setup help text; 500 generated sudokus each having exactly one answer; every scramble word; every crossword grid.
-- **Verified (headless Chrome at phone size, two separate "phones", 18 checks, `test/browser.mjs`):** a browser tab getting only the install page, including on a phone that already has a budget; first-time setup one question at a time with the explanation showing on every question; all three puzzles solved by tapping, wrong moves showing the warning, no skip offered, hints and "a different puzzle" finishing a puzzle; "We don't have this one"; setup resuming after the app is closed part-way; puzzles skippable and switchable once setup is done; the (i) on main-screen items; sending a file; the second phone opening it (wrong password and wrong file refused); an update coming back with the preview, Cancel, and Update; pasting the file as text; puzzles from the menu; PIN lock; reload and use with the network off; small-phone dark mode with extra-large text; no sideways overflow on any screen; no console errors; and that the only requests made were for the app's own files.
+- **Verified (automated, `npm test`, 20 checks on the real app code):** saving and reopening; that storage holds no readable labels, amounts or key; that data from the earlier server-based version still opens; that the app's code has no network calls; that every file is in the offline list and every element the code uses exists; locking and opening budget files (wrong password, altered file, wrong kind of file, text re-wrapped by email); a second phone opening a file; newer-wins merging both ways; the both-changed warning; renames, removals and cleared amounts; separately set-up phones lining up by item name; the PIN lock; the sealed sharing password; setup help text; 80 generated 9 × 9 sudokus each having exactly one answer (checked by a separate solver) and being solvable by reasoning but not too easy; every scramble word and round; 150 generated crossword grids.
+- **Verified (headless Chrome at phone size, two separate "phones", 18 checks, `test/browser.mjs`):** a browser tab getting only the install page, including on a phone that already has a budget; first-time setup one question at a time with the explanation showing on every question; all three puzzles solved by tapping (sudoku notes included), wrong moves showing the warning, the crossword's Check marking a wrong letter, no skip offered, hints and "a different puzzle" finishing a puzzle; "We don't have this one"; setup resuming after the app is closed part-way; puzzles skippable and switchable once setup is done; the (i) on main-screen items; sending a file; the second phone opening it (wrong password and wrong file refused); an update coming back with the preview, Cancel, and Update; pasting the file as text; puzzles from the menu; PIN lock; reload and use with the network off; small-phone dark mode with extra-large text; no sideways overflow on any screen; no console errors; and that the only requests made were for the app's own files.
 - **Not verified:** a real Android phone. In particular: installing it, the installed app being recognised as installed (the browser run simulates that answer), Android's share sheet handing the file to an email app (the test used "Save the file"), opening an attachment from an email app, and the GitHub Pages setup.
 
 ## Known limits
@@ -84,7 +88,7 @@ To try it on a computer instead: `npx serve docs` (or any static file server), o
 1. **Make adds combine instead of replace:** store each "add spending" as its own entry and sum them. That removes the main limit above and gives a history.
 2. **Test on a real phone.**
 3. **Yearly overview and rollover** of leftover money between months.
-4. **More puzzles:** bigger word lists, 6 x 6 sudoku, a longer crossword as a "month finished" reward.
+4. **More puzzles:** bigger word lists, a difficulty switch, a timer and best times.
 5. **Biometric unlock** (WebAuthn) next to the PIN.
 6. **Real APK** via Bubblewrap (Trusted Web Activity) once the Pages address exists.
 
@@ -99,7 +103,7 @@ docs/local.js       sealed storage on the phone
 docs/vault.js       key derivation and AES-GCM sealing
 docs/share.js       budget files: locking with the sharing password, reading them back
 docs/lock.js        PIN lock: wraps the budget key with a PIN-derived key
-docs/puzzles.js     sudoku maker, scramble words, crossword grids (no DOM)
+docs/puzzles.js     sudoku maker and grader, scramble words, crossword words and grid builder (no DOM)
 docs/games.js       draws the puzzles
 docs/sw.js          offline app shell
 test/app.test.mjs   automated checks (npm test)

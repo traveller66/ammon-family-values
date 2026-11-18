@@ -418,7 +418,7 @@ function wizIntro() {
       h('h2', { class: 'wiz-title', text: `Let's set up ${APP_NAME}` }),
       h('p', { class: 'wiz-lead', text: "We'll ask for one number at a time: first each income, then each bill. Every question says exactly what it is asking for." }),
       setupPending()
-        ? h('p', { class: 'help', text: 'Every answer unlocks a quick puzzle: a mini sudoku, a word scramble or a mini crossword. Solve it to move on to the next question. Stuck? Ask for a hint, or swap it for a different puzzle.' })
+        ? h('p', { class: 'help', text: 'Every answer unlocks a puzzle: a hard 9 × 9 sudoku, a three-word scramble or a big crossword. Solve it to move on to the next question. Stuck? Ask for a hint, check your answers, or swap it for a different puzzle.' })
         : gamesOn()
           ? h('p', { class: 'help', text: 'Every answer earns a quick puzzle. You can skip any of them, or turn them off in the menu.' })
           : null,

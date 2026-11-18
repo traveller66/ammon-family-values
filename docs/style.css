@@ -289,20 +289,71 @@ dialog::backdrop { background: rgba(30, 15, 5, 0.55); }
 .sq.sel { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); z-index: 1; }
 .sq.bad { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
 .sq:disabled { opacity: 1; }
-.sudoku { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.3rem; width: min(100%, 17rem); background: var(--line); border-radius: 16px; padding: 0.45rem; }
-.sudoku .sq { font-size: 1.8rem; }
-.sudoku .edge-r { margin-right: 0.5rem; }
-.sudoku .edge-b { margin-bottom: 0.5rem; }
-.xword { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 2.6rem)); gap: 0.2rem; justify-content: center; width: 100%; }
-.xword .num { position: absolute; top: 0.1rem; left: 0.25rem; font-size: 0.65rem; font-weight: 800; color: var(--muted); }
-.clues { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; text-align: left; justify-self: stretch; }
-.clues li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 0.4rem 0.7rem; font-size: 0.95rem; }
+.game-status.good { color: var(--good); }
+
+/* Sudoku, 9 x 9: nine boxes with thick lines between them, thin lines between squares. */
+.sudoku9 {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; width: min(100%, 26rem);
+  background: var(--ink); border: 3px solid var(--ink); border-radius: 8px; overflow: hidden;
+}
+.sbox { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line-strong); }
+.sudoku9 .sq { border: 0; border-radius: 0; font-size: clamp(1rem, 5.2vw, 1.5rem); background: var(--surface); }
+.sudoku9 .sq.given { background: var(--surface-2); color: var(--ink); }
+.sudoku9 .sq.peer { background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface)); }
+.sudoku9 .sq.same { background: var(--accent-soft); }
+.sudoku9 .sq.sel { background: var(--accent-soft); box-shadow: inset 0 0 0 3px var(--accent); }
+.sudoku9 .sq.bad { background: var(--bad-soft); color: var(--bad); }
+.notes { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; height: 100%; padding: 1px; }
+.notes span { display: grid; place-items: center; font-size: clamp(0.45rem, 2.2vw, 0.7rem); font-weight: 700; line-height: 1; color: var(--muted); }
+.keys-sudoku { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.keys-sudoku .key-clear { grid-column: span 2; }
+.key-note { display: grid; place-items: center; align-content: center; gap: 0.1rem; line-height: 1; }
+.key-note small { font-size: 0.68rem; font-weight: 800; }
+.key-note.on { background: var(--accent); color: var(--accent-ink); }
+.key.done { opacity: 0.4; }
+
+/* Word scramble: three rounds; a two-word answer shows each word on its own line. */
+.scr-progress { justify-self: stretch; text-align: left; font-weight: 800; color: var(--accent-text); margin: 0; }
+.scr-done { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; justify-self: stretch; }
+.scr-done:empty { display: none; }
+.scr-done li { background: var(--good-soft); color: var(--good); border-radius: 999px; padding: 0.25rem 0.75rem; font-size: 0.9rem; }
+.scr-stage { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.9rem; justify-items: center; width: 100%; }
+.clue-len { font-weight: 600; }
+.slots { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.4rem; width: 100%; }
+.slot-word { display: flex; gap: 0.25rem; justify-content: center; width: 100%; }
+.slots .slot { flex: 1 1 0; width: auto; max-width: 2.6rem; min-width: 0; font-size: clamp(0.95rem, 4.6vw, 1.4rem); border-style: dashed; border-radius: 8px; }
+.slots .slot.full { border-style: solid; }
+.slots.bad .slot { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+
+/* Crossword: a big grid, a clue bar and a full keyboard that stay at the bottom of the screen. */
+.xword { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 2px; width: min(100%, calc(var(--cols) * 2.7rem)); }
+.xword .sq { border-width: 1.5px; border-radius: 4px; font-size: clamp(0.85rem, 4.4vw, 1.3rem); }
+.xword .sq.inword { background: var(--accent-soft); }
+.xword .sq.sel { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); box-shadow: none; }
+.xword .sq.sel .num { color: var(--accent-ink); }
+.xword .sq.bad { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+.xword .num { position: absolute; top: 0; left: 0.12rem; font-size: clamp(0.45rem, 2vw, 0.62rem); font-weight: 800; color: var(--muted); line-height: 1.1; }
+.xdock { display: grid; gap: 0.35rem; width: 100%; max-width: 30rem; position: sticky; bottom: 0; z-index: 3; background: var(--bg); padding: 0.4rem 0 calc(0.4rem + env(safe-area-inset-bottom)); }
+.xclue { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr) 2.6rem; gap: 0.3rem; }
+.xclue button { border: 0; border-radius: 12px; background: var(--accent-soft); color: var(--accent-text); }
+.xclue-nav { font-size: 1.6rem; font-weight: 800; }
+.xclue-main { text-align: left; padding: 0.45rem 0.7rem; min-height: 3.2rem; font-size: 0.98rem; color: var(--ink) !important; line-height: 1.25; }
+.xclue-main b { color: var(--accent-text); }
+.qwerty { display: grid; gap: 0.3rem; }
+.qrow { display: flex; gap: 0.25rem; justify-content: center; }
+.qrow .key { flex: 1 1 0; min-width: 0; max-width: 2.8rem; min-height: 2.8rem; font-size: 1.05rem; border-radius: 8px; }
+.qrow .key-wide { flex: 1.5 1 0; max-width: 4.2rem; }
+.xlists { display: grid; gap: 0.8rem; justify-self: stretch; text-align: left; }
+.xlist h3 { margin: 0 0 0.35rem; font-size: 1rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.clues { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; text-align: left; justify-self: stretch; }
+.clues li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; font-size: 0.95rem; }
+.clues li button { all: unset; display: block; box-sizing: border-box; width: 100%; padding: 0.45rem 0.7rem; cursor: pointer; border-radius: 12px; }
+.clues li button:focus-visible { outline: 3px solid var(--accent); }
+.clues li.on { border-color: var(--accent); background: var(--accent-soft); }
+.clues li.filled { opacity: 0.6; }
 .clues b { color: var(--accent-text); }
 /* The letter and number keys stay in reach at the bottom of the screen while the puzzle scrolls. */
 .keys { display: grid; gap: 0.4rem; width: 100%; max-width: 24rem; position: sticky; bottom: 0; z-index: 2; background: var(--bg); padding: 0.5rem 0 calc(0.5rem + env(safe-area-inset-bottom)); }
-.keys-5 { grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.5fr); }
-.keys-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-.keys-6 .key-clear { grid-column: span 2; }
 .key {
   min-height: 3.1rem; padding: 0; border-radius: 12px; border: 0; background: var(--accent-soft); color: var(--accent-text);
   font-size: 1.3rem; font-weight: 800; box-shadow: 0 2px 0 var(--line-strong);
@@ -310,12 +361,8 @@ dialog::backdrop { background: rgba(30, 15, 5, 0.55); }
 .key:active { transform: translateY(2px); box-shadow: none; }
 .key:disabled { opacity: 0.25; box-shadow: none; }
 .key-clear { font-size: 0.95rem; background: var(--surface); border: 2px solid var(--line-strong); color: var(--muted); box-shadow: none; }
-.slots { display: flex; gap: 0.3rem; justify-content: center; width: 100%; }
-.slots .slot { flex: 1 1 0; max-width: 3rem; border-style: dashed; }
-.slots .slot.full { border-style: solid; }
-.slots.bad .slot { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
 .tiles { display: flex; flex-wrap: wrap; gap: 0.4rem; justify-content: center; width: 100%; }
-.tiles .tile { width: 3.1rem; flex: none; }
+.tiles .tile { width: 2.9rem; flex: none; }
 .game .chip { justify-self: center; }
 .game-must { text-align: left; color: var(--accent-text); font-weight: 800; }
 .game-help { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
@@ -325,7 +372,8 @@ dialog::backdrop { background: rgba(30, 15, 5, 0.55); }
 .game-win b { font-size: 1.6rem; }
 .game-win span { font-weight: 700; }
 .game.won .sq { border-color: var(--good); color: var(--good); background: var(--good-soft); }
-.game.won .keys, .game.won .tiles, .game.won .chip, .game.won .game-how { display: none; }
+.game.won .keys, .game.won .tiles, .game.won .chip, .game.won .game-how, .game.won .xdock, .game.won .scr-stage { display: none; }
+.game.won .sudoku9 .sq { background: var(--good-soft); color: var(--good); box-shadow: none; }
 @keyframes pop { 0% { transform: scale(0.85); opacity: 0; } 70% { transform: scale(1.04); } 100% { transform: scale(1); opacity: 1; } }
 #dlg-game .game-praise { display: none; }
 

@@ -11,7 +11,7 @@ import { LocalBook } from '../docs/local.js';
 import { createMemoryStore } from '../docs/store.js';
 import { wrapKey, unwrapKey, validPin } from '../docs/lock.js';
 import { sealFile, parseFile, openFile, validPassword, fileName } from '../docs/share.js';
-import { makeSudoku, sudokuSolved, sudokuClashes, SCRAMBLE_WORDS, makeScramble, CROSSWORDS, layCrossword, GAME_KINDS } from '../docs/puzzles.js';
+import { makeSudoku, sudokuSolved, sudokuClashes, gradeSudoku, SCRAMBLE_WORDS, SCRAMBLE_ROUND, makeScramble, CROSSWORD_WORDS, CROSSWORD_SIZE, makeCrossword, layCrossword, GAME_KINDS } from '../docs/puzzles.js';
 
 const DOCS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../docs');
 const MONTH = '2026-11';
@@ -279,53 +279,100 @@ await step('every starting item has its own "I\'m asking for" help', () => {
   assert.match(helpFor('Pet care', 'e', 'a').ask, /Pet care/);
   assert.deepEqual(parseMoney('$1,200.50'), { ok: true, cents: 120050 });
 });
-await step('mini sudoku: 500 fresh puzzles each have exactly one answer and enough empty squares', () => {
-  const count = (g) => {
-    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
-      if (g[r][c]) continue;
-      let n = 0;
-      for (let v = 1; v <= 4; v++) { g[r][c] = v; if (!sudokuClashes(g).has(`${r},${c}`)) n += count(g); }
-      g[r][c] = 0;
-      return n;
+await step('sudoku: 80 fresh 9 x 9 puzzles each have exactly one answer, 22 to 32 givens, and need more than the easy moves', () => {
+  // An independent answer counter (plain backtracking), so the app's own solver is not checking itself.
+  const count = (g, limit = 2) => {
+    let best = -1;
+    let bestOpts = null;
+    for (let i = 0; i < 81; i++) {
+      if (g[i]) continue;
+      const r = Math.floor(i / 9), c = i % 9, br = r - (r % 3), bc = c - (c % 3);
+      const opts = [];
+      for (let v = 1; v <= 9; v++) {
+        let ok = true;
+        for (let k = 0; k < 9 && ok; k++) if (g[r * 9 + k] === v || g[k * 9 + c] === v || g[(br + Math.floor(k / 3)) * 9 + bc + (k % 3)] === v) ok = false;
+        if (ok) opts.push(v);
+      }
+      if (!bestOpts || opts.length < bestOpts.length) { best = i; bestOpts = opts; }
+      if (opts.length === 0) return 0;
     }
-    return 1;
+    if (best < 0) return 1;
+    let n = 0;
+    for (const v of bestOpts) { g[best] = v; n += count(g, limit - n); if (n >= limit) break; }
+    g[best] = 0;
+    return n;
   };
-  for (let i = 0; i < 500; i++) {
+  for (let i = 0; i < 80; i++) {
     const { puzzle, solution } = makeSudoku();
+    assert.equal(puzzle.length, 9);
     assert.ok(sudokuSolved(solution));
     assert.ok(!sudokuSolved(puzzle));
-    const blanks = puzzle.flat().filter((v) => !v).length;
-    assert.ok(blanks >= 4 && blanks <= 7, `blanks: ${blanks}`);
-    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) if (puzzle[r][c]) assert.equal(puzzle[r][c], solution[r][c]);
-    assert.equal(count(puzzle.map((row) => [...row])), 1);
+    const givens = puzzle.flat().filter((v) => v).length;
+    assert.ok(givens >= 22 && givens <= 32, `givens: ${givens}`);
+    for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (puzzle[r][c]) assert.equal(puzzle[r][c], solution[r][c]);
+    assert.equal(count(puzzle.flat()), 1);
+    const grade = gradeSudoku(puzzle.flat());
+    assert.ok(grade.solved, 'needs guessing');
+    assert.ok(grade.level >= 2, 'too easy');
+    assert.deepEqual(grade.cells, solution.flat());
   }
+  const g = Array.from({ length: 9 }, () => Array(9).fill(0));
+  g[4][1] = 5;
+  g[4][7] = 5;
+  const bad = sudokuClashes(g);
+  assert.ok(bad.has('4,1') && bad.has('4,7') && bad.size === 2);
   assert.ok(sudokuClashes([[1, 1, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]).has('0,1'));
 });
-await step('word scramble: every word is mixed up, uses the same letters, and has a clue', () => {
-  SCRAMBLE_WORDS.forEach(([word, clue], i) => {
-    assert.match(word, /^[A-Z]{4,8}$/);
-    assert.ok(clue.length > 5 && !clue.toUpperCase().includes(word), `clue gives away ${word}`);
-    for (let k = 0; k < 20; k++) {
-      const s = makeScramble(Math.random, i);
-      assert.equal(s.word, word);
-      assert.notEqual(s.tiles.join(''), word);
-      assert.equal([...s.tiles].sort().join(''), word.split('').sort().join(''));
-    }
+await step('word scramble: three long words or phrases a round, each mixed up, with a clue that does not give it away', () => {
+  assert.equal(SCRAMBLE_ROUND, 3);
+  SCRAMBLE_WORDS.forEach(([answer, clue]) => {
+    assert.match(answer, /^[A-Z]+( [A-Z]+)?$/);
+    const letters = answer.replace(/ /g, '').length;
+    assert.ok(letters >= 8 && letters <= 16, `${answer}: ${letters} letters`);
+    for (const part of answer.split(' ')) assert.ok(!clue.toUpperCase().includes(part), `clue gives away ${answer}`);
+    assert.ok(clue.length > 10);
   });
   assert.equal(new Set(SCRAMBLE_WORDS.map((w) => w[0])).size, SCRAMBLE_WORDS.length);
+  const seen = new Set();
+  for (let n = 0; n < SCRAMBLE_WORDS.length; n++) {
+    const { items } = makeScramble(Math.random, n);
+    assert.equal(items.length, 3);
+    for (const it of items) {
+      seen.add(it.answer);
+      assert.equal(it.word, it.answer.replace(/ /g, ''));
+      assert.deepEqual(it.lengths, it.answer.split(' ').map((w) => w.length));
+      assert.notEqual(it.tiles.join(''), it.word);
+      assert.equal([...it.tiles].sort().join(''), it.word.split('').sort().join(''));
+    }
+  }
+  assert.equal(seen.size, SCRAMBLE_WORDS.length, 'some words never come up');
 });
-await step('mini crossword: every grid fits a phone, its words cross cleanly, and its letters are all offered', () => {
-  for (const words of CROSSWORDS) {
-    const x = layCrossword(words);
-    assert.ok(x.rows <= 6 && x.cols <= 7, 'too big for a phone');
-    assert.equal(x.clues.length, 3);
+await step('crossword: 150 fresh grids fit a phone, have 16+ words that all link up, and form no stray words', () => {
+  CROSSWORD_WORDS.forEach(([w, clue]) => {
+    assert.match(w, /^[A-Z]{3,11}$/);
+    assert.ok(!clue.toUpperCase().includes(w), `clue gives away ${w}`);
+  });
+  assert.equal(new Set(CROSSWORD_WORDS.map((x) => x[0])).size, CROSSWORD_WORDS.length, 'a word is listed twice');
+  assert.equal(new Set(CROSSWORD_WORDS.map((x) => x[1])).size, CROSSWORD_WORDS.length, 'a clue is used twice');
+  for (let i = 0; i < 150; i++) {
+    const x = makeCrossword();
+    assert.ok(x.rows <= CROSSWORD_SIZE.rows && x.cols <= CROSSWORD_SIZE.cols, `too big for a phone: ${x.rows} x ${x.cols}`);
+    assert.ok(x.clues.length >= 16, `only ${x.clues.length} words`);
+    assert.equal(new Set(x.clues.map((c) => c.word)).size, x.clues.length, 'a word appears twice');
     for (const c of x.clues) {
       assert.equal(c.cells.map((k) => x.cells.get(k)).join(''), c.word);
-      assert.ok(!c.clue.toUpperCase().includes(c.word), `clue gives away ${c.word}`);
       assert.ok(x.clues.some((o) => o !== c && o.cells.some((k) => c.cells.includes(k))), `${c.word} crosses nothing`);
     }
-    for (const letter of x.cells.values()) assert.ok(x.bank.includes(letter));
-    assert.ok(x.bank.length >= 10 && x.bank.length <= 11);
+    // every word can be reached from every other through crossings
+    const reached = new Set([0]);
+    for (let grew = true; grew;) {
+      grew = false;
+      x.clues.forEach((c, j) => {
+        if (reached.has(j)) return;
+        if ([...reached].some((r) => x.clues[r].cells.some((k) => c.cells.includes(k)))) { reached.add(j); grew = true; }
+      });
+    }
+    assert.equal(reached.size, x.clues.length, 'grid falls apart into pieces');
     // no accidental extra words: squares that touch must belong to the same word
     for (const k of x.cells.keys()) {
       const [r, c] = k.split(',').map(Number);
@@ -333,6 +380,10 @@ await step('mini crossword: every grid fits a phone, its words cross cleanly, an
         if (x.cells.has(n)) assert.ok(x.clues.some((cl) => cl.cells.includes(k) && cl.cells.includes(n)), `stray neighbours at ${k}`);
       }
     }
+    // numbering: each word starts on its number, numbers run in reading order
+    const nums = [...x.numbers.entries()].sort((a, b) => a[1] - b[1]).map((e) => e[0].split(',').map(Number));
+    for (let j = 1; j < nums.length; j++) assert.ok(nums[j][0] > nums[j - 1][0] || (nums[j][0] === nums[j - 1][0] && nums[j][1] > nums[j - 1][1]));
+    for (const c of x.clues) assert.equal(x.numbers.get(c.cells[0]), c.num);
   }
   assert.throws(() => layCrossword([{ w: 'AB', r: 0, c: 0, d: 'a', clue: '' }, { w: 'XY', r: 0, c: 0, d: 'd', clue: '' }]));
   assert.deepEqual(GAME_KINDS, ['sudoku', 'scramble', 'crossword']);
