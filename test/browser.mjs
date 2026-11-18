@@ -82,8 +82,8 @@ async function solveGame(p) {
     assert.ok(solve());
     const empties = [];
     for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) empties.push([r, c]);
-    // first a deliberate mistake: a number already in that row
-    const [r0, c0] = empties[0];
+    // first a deliberate mistake: a number already in that row (hard puzzles can have a row with nothing given, so pick one that has)
+    const [r0, c0] = empties.find(([r]) => givens[r].some((v) => v));
     const wrong = givens[r0].find((v) => v);
     await sq.nth(domIndex[r0][c0]).click();
     await root.locator('.keys .key', { hasText: new RegExp(`^${wrong}$`) }).click();
@@ -91,7 +91,7 @@ async function solveGame(p) {
     assert.match(await root.locator('.game-status').textContent(), /repeated/);
     // notes: pencil marks go in small, and a real number replaces them
     await root.locator('.key-note').click();
-    const [r1, c1] = empties[1];
+    const [r1, c1] = empties.find(([r, c]) => r !== r0 || c !== c0);
     await sq.nth(domIndex[r1][c1]).click();
     await root.locator('.keys .key', { hasText: /^1$/ }).click();
     await root.locator('.keys .key', { hasText: /^2$/ }).click();
@@ -102,9 +102,11 @@ async function solveGame(p) {
       await root.locator('.keys .key', { hasText: new RegExp(`^${g[r][c]}$`) }).click();
     }
   } else if (kind === 'scramble') {
-    const answers = await page.evaluate(async () => (await import('./puzzles.js')).SCRAMBLE_WORDS.map((w) => w[0]));
-    for (let round = 0; round < 3; round++) {
-      assert.match(await root.locator('.scr-progress').textContent(), new RegExp(`Word ${round + 1} of 3`));
+    const easy = (await root.getAttribute('data-level')) === 'easy';
+    const answers = await page.evaluate(async (e) => { const m = await import('./puzzles.js'); return (e ? m.SCRAMBLE_EASY : m.SCRAMBLE_WORDS).map((w) => w[0]); }, easy);
+    const rounds = easy ? 1 : 3;
+    for (let round = 0; round < rounds; round++) {
+      if (!easy) assert.match(await root.locator('.scr-progress').textContent(), new RegExp(`Word ${round + 1} of 3`));
       const tiles = await root.locator('.tiles .tile').evaluateAll((els) => els.map((e) => e.textContent));
       const answer = answers.find((w) => w.replace(/ /g, '').split('').sort().join('') === [...tiles].sort().join(''));
       assert.ok(answer, 'scramble word not in list');
@@ -120,15 +122,16 @@ async function solveGame(p) {
         used.add(i);
         await root.locator('.tiles .tile').nth(i).click();
       }
-      if (round < 2) await root.locator('.scr-done li').nth(round).waitFor();
+      if (round < rounds - 1) await root.locator('.scr-done li').nth(round).waitFor();
     }
   } else {
     // Each clue in the list is unique, so it says which word goes there. Tap the clue, then fill its squares.
-    const list = await page.evaluate(async () => (await import('./puzzles.js')).CROSSWORD_WORDS);
+    const easy = (await root.getAttribute('data-level')) === 'easy';
+    const list = await page.evaluate(async (e) => { const m = await import('./puzzles.js'); return e ? m.CROSSWORD_EASY : m.CROSSWORD_WORDS; }, easy);
     const byClue = new Map(list.map(([w, c]) => [c, w]));
     const clueButtons = root.locator('.xlists .clues li button');
     const n = await clueButtons.count();
-    assert.ok(n >= 16, `only ${n} clues`);
+    assert.ok(n >= (easy ? 5 : 16), `only ${n} clues`);
     let firstWrong = true;
     for (let i = 0; i < n; i++) {
       if (await root.locator('.game-win').count()) break; // crossing words can finish the grid before the last clue
@@ -274,7 +277,24 @@ try {
       assert.equal(await A.page.locator('#wiz-body .game-skip').count(), 0);
       await hintThrough(A);
       kinds.push('swapped');
+    } else if (kinds.length === 4) {
+      // Too hard? Easy mode swaps it right away for an easier puzzle of the same kind, still required.
+      const before = await A.page.locator('#wiz-body .game').getAttribute('data-game');
+      assert.equal(await A.page.locator('#wiz-body .game').getAttribute('data-level'), 'hard');
+      await shot(A, '03-game-4-hard');
+      await A.page.click('#wiz-body .game-level');
+      await A.page.locator('#wiz-body .game[data-level="easy"]').waitFor();
+      assert.equal(await A.page.locator('#wiz-body .game').getAttribute('data-game'), before);
+      assert.match(await A.page.textContent('#wiz-body .eyebrow'), /Easy|Word scramble|Small crossword/);
+      assert.equal(await A.page.locator('#wiz-body .game-skip').count(), 0);
+      assert.match(await A.page.textContent('#wiz-body .game-must'), /Solve this one to move on/);
+      assert.match(await A.page.textContent('#wiz-body .game-level'), /Back to hard mode/);
+      await noOverflow(A, 'easy game');
+      await shot(A, '03-game-4-easy');
+      await solveGame(A);
+      kinds.push('easy');
     } else {
+      assert.equal(await A.page.locator('#wiz-body .game').getAttribute('data-level'), 'easy'); // the choice is remembered
       await hintThrough(A); // hints alone can finish any puzzle, so nobody is locked out
       kinds.push('hints');
     }
@@ -283,11 +303,11 @@ try {
     await A.page.click('.game-next');
     await A.page.locator('#wiz-body .game').waitFor({ state: 'detached' });
   }
-  assert.deepEqual(kinds, ['sudoku', 'scramble', 'crossword', 'swapped', 'hints']);
+  assert.deepEqual(kinds, ['sudoku', 'scramble', 'crossword', 'swapped', 'easy']);
   assert.deepEqual(asked.slice(0, 5), ['Paycheck 1', 'Paycheck 2', 'Other income', 'Rent or mortgage', 'Electricity']);
   assert.equal(asked.length, 15);
   ok('first-time setup: one small question at a time, the explanation always showing, and a puzzle that must be solved after every answer');
-  ok('a question left blank has no puzzle; hints and "a different puzzle" get anyone unstuck without a skip');
+  ok('a question left blank has no puzzle; hints, "a different puzzle" and "Easy mode" get anyone unstuck without a skip');
 
   await A.page.click("text=No, that's everything");
   await A.page.click('text=Not now');
@@ -430,6 +450,28 @@ try {
   ok('bringing in an update shows a preview first (with the both-changed warning), Cancel changes nothing, Update applies it, and it sticks');
 
   /* ---------------- puzzles from the menu ---------------- */
+  // Easy mode chosen during setup shows in the menu; switching it off there brings hard puzzles back.
+  await A.page.click('#btn-menu');
+  assert.equal(await A.page.isChecked('#m-easy'), true);
+  await A.page.click('label[for="m-easy"]');
+  assert.equal(await A.page.evaluate(() => localStorage.getItem('fb.level')), 'hard');
+  await A.page.click('#m-close');
+  await A.page.click('#btn-play');
+  await A.page.locator('#dlg-game[open] .game[data-level="hard"]').waitFor();
+  const kindBefore = await A.page.locator('#dlg-game .game').getAttribute('data-game');
+  await A.page.click('#dlg-game .game-level'); // "Too hard? Easy mode"
+  await A.page.locator('#dlg-game[open] .game[data-level="easy"]').waitFor();
+  assert.equal(await A.page.locator('#dlg-game .game').getAttribute('data-game'), kindBefore);
+  await solveGame(A);
+  await A.page.click('.game-next');
+  await A.page.locator('#dlg-game[open] .game[data-level="easy"]:not(.won)').waitFor(); // still easy
+  await A.page.click('#dlg-game .game-level'); // "Back to hard mode"
+  await A.page.locator('#dlg-game[open] .game[data-level="hard"]').waitFor();
+  await A.page.click('#game-close');
+  await A.page.click('#btn-menu');
+  assert.equal(await A.page.isChecked('#m-easy'), false);
+  await A.page.click('#m-close');
+  ok('"Easy mode" swaps a puzzle for an easier one right away, is remembered, and the menu switch matches');
   await A.page.click('#btn-play');
   await A.page.locator('#dlg-game[open] .game').waitFor();
   assert.equal(await A.page.locator('#dlg-game .game-must').count(), 0);

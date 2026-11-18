@@ -1,4 +1,4 @@
-// Reward puzzles: a hard 9 x 9 sudoku, a three-word scramble and a big crossword. Puzzle rules live in puzzles.js; this file draws them.
+// Reward puzzles: sudoku, word scramble and crossword, each hard or easy. Puzzle rules live in puzzles.js; this file draws them.
 import { makeSudoku, sudokuClashes, sudokuSolved, makeScramble, makeCrossword, GAME_KINDS } from './puzzles.js';
 
 function h(tag, props = {}, ...kids) {
@@ -16,7 +16,10 @@ function h(tag, props = {}, ...kids) {
 }
 
 const CHEERS = ['Solved!', 'Nicely done!', 'You got it!', 'Brilliant!', 'What a brain!', 'Impressive!'];
-const NAMES = { sudoku: 'Hard sudoku', scramble: 'Triple scramble', crossword: 'Big crossword' };
+const NAMES = {
+  hard: { sudoku: 'Hard sudoku', scramble: 'Triple scramble', crossword: 'Big crossword' },
+  easy: { sudoku: 'Easy sudoku', scramble: 'Word scramble', crossword: 'Small crossword' },
+};
 const byPlace = (a, b) => {
   const [ar, ac] = a.split(',').map(Number);
   const [br, bc] = b.split(',').map(Number);
@@ -30,18 +33,22 @@ const byPlace = (a, b) => {
  *   praise    a line shown above the puzzle ("Groceries is planned.")
  *   required  true during first-time setup: there is no skip, the puzzle has to be solved to move on.
  *             Nobody gets stuck: "Give me a hint" fills in one square, and `onSwap` offers a different puzzle.
+ *   level     'hard' (the default) or 'easy'
+ *   onLevel   if given, a button offers the other level; it is called with 'easy' or 'hard' and should put up a
+ *             puzzle of the same kind at that level right away (it is offered during required setup too)
  *   onSolved  called once when the puzzle is solved; may return the running total of solved puzzles
  *   onSwap    if given, a "Try a different puzzle" button calls it
  *   onDone    called when the person moves on (after solving, or by skipping when that is allowed)
  */
-export function mountGame(host, { kind, n = 0, praise = '', required = false, doneLabel = 'Keep going', skipLabel = 'Skip this puzzle', onSolved = () => null, onSwap = null, onDone }) {
+export function mountGame(host, { kind, n = 0, praise = '', required = false, level = 'hard', doneLabel = 'Keep going', skipLabel = 'Skip this puzzle', onSolved = () => null, onLevel = null, onSwap = null, onDone }) {
   if (!GAME_KINDS.includes(kind)) kind = GAME_KINDS[0];
+  if (level !== 'easy') level = 'hard';
   const status = h('p', { class: 'game-status', role: 'status', 'aria-live': 'polite' });
   const board = h('div', { class: 'game-board' });
   const wrap = h(
     'div',
-    { class: 'wiz-stack game', 'data-game': kind },
-    h('p', { class: 'eyebrow', text: `Puzzle break · ${NAMES[kind]}` }),
+    { class: 'wiz-stack game', 'data-game': kind, 'data-level': level },
+    h('p', { class: 'eyebrow', text: `Puzzle break · ${NAMES[level][kind]}` }),
     praise ? h('h2', { class: 'wiz-title game-praise', text: praise }) : null,
     required ? h('p', { class: 'game-must', text: 'Solve this one to move on.' }) : null,
     board,
@@ -68,11 +75,18 @@ export function mountGame(host, { kind, n = 0, praise = '', required = false, do
     status.textContent = msg;
     status.classList.toggle('good', good);
   };
-  const game = ({ sudoku, scramble, crossword })[kind](board, { n, win, say });
+  const game = ({ sudoku, scramble, crossword })[kind](board, { n, win, say, level });
   wrap.append(
     h(
       'div',
       { class: 'game-help' },
+      onLevel
+        ? h('button', {
+            class: `chip game-level${level === 'hard' ? ' to-easy' : ''}`, type: 'button',
+            text: level === 'hard' ? 'Too hard? Easy mode' : 'Back to hard mode',
+            onclick: () => onLevel(level === 'hard' ? 'easy' : 'hard'),
+          })
+        : null,
       h('button', { class: 'chip game-hint', type: 'button', text: 'Give me a hint', onclick: () => { if (!finished) game.hint(); } }),
       game.check ? h('button', { class: 'chip game-check', type: 'button', text: 'Check my answers', onclick: () => { if (!finished) game.check(); } }) : null,
       onSwap ? h('button', { class: 'chip game-swap', type: 'button', text: 'Try a different puzzle', onclick: () => onSwap() }) : null,
@@ -97,8 +111,8 @@ export function mountGame(host, { kind, n = 0, praise = '', required = false, do
 // hint puts one right answer in place; check marks wrong answers in red; key handles a hardware key press.
 
 /* ------------------------------------------------------------------ sudoku (9 x 9) */
-function sudoku(board, { win, say }) {
-  const { puzzle, solution } = makeSudoku();
+function sudoku(board, { win, say, level }) {
+  const { puzzle, solution } = makeSudoku(Math.random, level);
   const grid = puzzle.map((row) => [...row]);
   const notes = puzzle.map((row) => row.map(() => new Set()));
   const cells = [];
@@ -219,15 +233,15 @@ function sudoku(board, { win, say }) {
 }
 
 /* ------------------------------------------------------------------ word scramble (three in a row) */
-function scramble(board, { n, win, say }) {
-  const { items } = makeScramble(Math.random, n);
+function scramble(board, { n, win, say, level }) {
+  const { items } = makeScramble(Math.random, n, level);
   let at = 0;
   let current = null;
   const progress = h('p', { class: 'scr-progress' });
   const done = h('ol', { class: 'scr-done', 'aria-label': 'Solved so far' });
   const stage = h('div', { class: 'scr-stage' });
   board.append(
-    h('p', { class: 'game-how', text: 'Unscramble all three. Tap the letters in the right order; tap a letter in your answer to take it back.' }),
+    h('p', { class: 'game-how', text: `${items.length > 1 ? 'Unscramble all three. ' : ''}Tap the letters in the right order; tap a letter in your answer to take it back.` }),
     progress,
     done,
     stage,
@@ -315,7 +329,7 @@ function scramble(board, { n, win, say }) {
 
   const next = () => {
     if (at >= items.length) return win();
-    progress.textContent = `Word ${at + 1} of ${items.length}`;
+    progress.textContent = items.length > 1 ? `Word ${at + 1} of ${items.length}` : '';
     current = one(items[at], () => {
       done.append(h('li', {}, h('b', { text: items[at].answer }), h('span', { text: ' ✓', 'aria-hidden': 'true' })));
       at++;
@@ -328,8 +342,8 @@ function scramble(board, { n, win, say }) {
 }
 
 /* ------------------------------------------------------------------ crossword (big) */
-function crossword(board, { win, say }) {
-  const x = makeCrossword();
+function crossword(board, { win, say, level }) {
+  const x = makeCrossword(Math.random, level);
   const words = x.clues; // in clue-list order: all Across, then all Down
   const order = [...x.cells.keys()].sort(byPlace);
   const across = new Map(); // square -> index into words

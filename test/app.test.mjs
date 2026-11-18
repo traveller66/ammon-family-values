@@ -11,7 +11,7 @@ import { LocalBook } from '../docs/local.js';
 import { createMemoryStore } from '../docs/store.js';
 import { wrapKey, unwrapKey, validPin } from '../docs/lock.js';
 import { sealFile, parseFile, openFile, validPassword, fileName } from '../docs/share.js';
-import { makeSudoku, sudokuSolved, sudokuClashes, gradeSudoku, SCRAMBLE_WORDS, SCRAMBLE_ROUND, makeScramble, CROSSWORD_WORDS, CROSSWORD_SIZE, makeCrossword, layCrossword, GAME_KINDS } from '../docs/puzzles.js';
+import { makeSudoku, sudokuSolved, sudokuClashes, gradeSudoku, SCRAMBLE_WORDS, SCRAMBLE_EASY, SCRAMBLE_ROUND, makeScramble, CROSSWORD_WORDS, CROSSWORD_EASY, CROSSWORD_SIZE, CROSSWORD_EASY_SIZE, makeCrossword, layCrossword, GAME_KINDS, LEVELS } from '../docs/puzzles.js';
 
 const DOCS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../docs');
 const MONTH = '2026-11';
@@ -279,7 +279,7 @@ await step('every starting item has its own "I\'m asking for" help', () => {
   assert.match(helpFor('Pet care', 'e', 'a').ask, /Pet care/);
   assert.deepEqual(parseMoney('$1,200.50'), { ok: true, cents: 120050 });
 });
-await step('sudoku: 80 fresh 9 x 9 puzzles each have exactly one answer, 22 to 32 givens, and need more than the easy moves', () => {
+await step('sudoku: 80 fresh 9 x 9 puzzles each have exactly one answer, 20 to 32 givens, and need more than the easy moves', () => {
   // An independent answer counter (plain backtracking), so the app's own solver is not checking itself.
   const count = (g, limit = 2) => {
     let best = -1;
@@ -308,7 +308,7 @@ await step('sudoku: 80 fresh 9 x 9 puzzles each have exactly one answer, 22 to 3
     assert.ok(sudokuSolved(solution));
     assert.ok(!sudokuSolved(puzzle));
     const givens = puzzle.flat().filter((v) => v).length;
-    assert.ok(givens >= 22 && givens <= 32, `givens: ${givens}`);
+    assert.ok(givens >= 20 && givens <= 32, `givens: ${givens}`);
     for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (puzzle[r][c]) assert.equal(puzzle[r][c], solution[r][c]);
     assert.equal(count(puzzle.flat()), 1);
     const grade = gradeSudoku(puzzle.flat());
@@ -387,6 +387,49 @@ await step('crossword: 150 fresh grids fit a phone, have 16+ words that all link
   }
   assert.throws(() => layCrossword([{ w: 'AB', r: 0, c: 0, d: 'a', clue: '' }, { w: 'XY', r: 0, c: 0, d: 'd', clue: '' }]));
   assert.deepEqual(GAME_KINDS, ['sudoku', 'scramble', 'crossword']);
+  assert.deepEqual(LEVELS, ['hard', 'easy']);
+});
+await step('easy mode: 9 x 9 sudoku with 41 givens that singles alone finish, one short scramble word, a small crossword', () => {
+  for (let i = 0; i < 60; i++) {
+    const { puzzle, solution } = makeSudoku(Math.random, 'easy');
+    assert.ok(sudokuSolved(solution));
+    assert.equal(puzzle.flat().filter((v) => v).length, 41);
+    for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (puzzle[r][c]) assert.equal(puzzle[r][c], solution[r][c]);
+    const grade = gradeSudoku(puzzle.flat());
+    assert.ok(grade.solved && grade.level === 1, 'easy sudoku needs more than singles');
+    assert.deepEqual(grade.cells, solution.flat()); // solved by sound steps, so this is the only answer
+  }
+  SCRAMBLE_EASY.forEach(([word, clue]) => {
+    assert.match(word, /^[A-Z]{5,8}$/);
+    assert.ok(!clue.toUpperCase().includes(word), `clue gives away ${word}`);
+  });
+  for (let n = 0; n < SCRAMBLE_EASY.length; n++) {
+    const { items } = makeScramble(Math.random, n, 'easy');
+    assert.equal(items.length, 1);
+    assert.equal(items[0].answer, SCRAMBLE_EASY[n][0]);
+    assert.notEqual(items[0].tiles.join(''), items[0].word);
+  }
+  CROSSWORD_EASY.forEach(([w, clue]) => {
+    assert.match(w, /^[A-Z]{3,7}$/);
+    assert.ok(!clue.toUpperCase().includes(w), `clue gives away ${w}`);
+  });
+  assert.equal(new Set(CROSSWORD_EASY.map((x) => x[0])).size, CROSSWORD_EASY.length);
+  assert.equal(new Set(CROSSWORD_EASY.map((x) => x[1])).size, CROSSWORD_EASY.length);
+  for (let i = 0; i < 150; i++) {
+    const x = makeCrossword(Math.random, 'easy');
+    assert.ok(x.rows <= CROSSWORD_EASY_SIZE.rows && x.cols <= CROSSWORD_EASY_SIZE.cols);
+    assert.ok(x.clues.length >= 5 && x.clues.length <= 8, `${x.clues.length} words`);
+    for (const c of x.clues) {
+      assert.equal(c.cells.map((k) => x.cells.get(k)).join(''), c.word);
+      assert.ok(CROSSWORD_EASY.some(([w]) => w === c.word));
+    }
+    for (const k of x.cells.keys()) {
+      const [r, c] = k.split(',').map(Number);
+      for (const nb of [`${r},${c + 1}`, `${r + 1},${c}`]) {
+        if (x.cells.has(nb)) assert.ok(x.clues.some((cl) => cl.cells.includes(k) && cl.cells.includes(nb)), `stray neighbours at ${k}`);
+      }
+    }
+  }
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

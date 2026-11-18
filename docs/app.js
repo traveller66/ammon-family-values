@@ -142,7 +142,7 @@ async function enter(key, creator) {
   }
 }
 
-const KEEP = ['fb.size', 'fb.currency', 'fb.games', 'fb.gameN', 'fb.solved']; // look-and-feel choices that are not budget data
+const KEEP = ['fb.size', 'fb.currency', 'fb.games', 'fb.gameN', 'fb.solved', 'fb.level']; // look-and-feel choices that are not budget data
 function leaveLocal(message) {
   book = null;
   vault = null;
@@ -418,7 +418,7 @@ function wizIntro() {
       h('h2', { class: 'wiz-title', text: `Let's set up ${APP_NAME}` }),
       h('p', { class: 'wiz-lead', text: "We'll ask for one number at a time: first each income, then each bill. Every question says exactly what it is asking for." }),
       setupPending()
-        ? h('p', { class: 'help', text: 'Every answer unlocks a puzzle: a hard 9 × 9 sudoku, a three-word scramble or a big crossword. Solve it to move on to the next question. Stuck? Ask for a hint, check your answers, or swap it for a different puzzle.' })
+        ? h('p', { class: 'help', text: 'Every answer unlocks a puzzle: a sudoku, a word scramble or a crossword. Solve it to move on to the next question. Too hard? Tap Easy mode for a simpler one right away, ask for a hint, or swap it for a different puzzle.' })
         : gamesOn()
           ? h('p', { class: 'help', text: 'Every answer earns a quick puzzle. You can skip any of them, or turn them off in the menu.' })
           : null,
@@ -1105,6 +1105,8 @@ function applyPlan(plan) {
 
 /* ------------------------------------------------------------------ reward puzzles */
 const gamesOn = () => store.get('fb.games') !== 'off';
+/** 'hard' (the default) or 'easy'. Set from the Easy mode button on any puzzle, or the menu switch. */
+const puzzleLevel = () => (store.get('fb.level') === 'easy' ? 'easy' : 'hard');
 
 /** Which puzzle comes next: sudoku, then a word scramble, then a crossword, round and round. */
 function nextGame() {
@@ -1131,8 +1133,13 @@ function reward(praise, then) {
   const required = setupPending();
   if (!required && !gamesOn()) return then();
   $('#wiz-step').textContent = 'Puzzle break';
-  const mount = () => {
-    mountGame($('#wiz-body'), { ...nextGame(), praise, required, onSolved: countSolved, onSwap: mount, onDone: then });
+  // Easy mode / hard mode swaps the puzzle on screen for one of the same kind at the other level.
+  const mount = (game = nextGame()) => {
+    const onLevel = (level) => {
+      store.set('fb.level', level);
+      mount(game);
+    };
+    mountGame($('#wiz-body'), { ...game, praise, required, level: puzzleLevel(), onLevel, onSolved: countSolved, onSwap: () => mount(), onDone: then });
     window.scrollTo(0, 0);
     $('#wizard').scrollTop = 0;
   };
@@ -1141,7 +1148,14 @@ function reward(praise, then) {
 
 /** From the menu: puzzles just for fun. */
 function playPuzzle() {
-  mountGame($('#game-host'), { ...nextGame(), doneLabel: 'Another puzzle', skipLabel: 'Try a different puzzle', onSolved: countSolved, onDone: playPuzzle });
+  const show = (game) => {
+    const onLevel = (level) => {
+      store.set('fb.level', level);
+      show(game);
+    };
+    mountGame($('#game-host'), { ...game, level: puzzleLevel(), onLevel, doneLabel: 'Another puzzle', skipLabel: 'Try a different puzzle', onSolved: countSolved, onDone: () => playPuzzle() });
+  };
+  show(nextGame());
   if (!$('#dlg-game').open) $('#dlg-game').showModal();
 }
 
@@ -1187,6 +1201,7 @@ function wire() {
     $('#m-currency').value = currency;
     $('#m-size').checked = store.get('fb.size') === 'xl';
     $('#m-games').checked = gamesOn();
+    $('#m-easy').checked = puzzleLevel() === 'easy';
     $('#m-lock').textContent = loadWrapped() ? 'Turn off app lock (PIN)' : 'Turn on app lock (PIN)';
     menu.showModal();
   });
@@ -1209,6 +1224,7 @@ function wire() {
     applySize();
   });
   $('#m-games').addEventListener('change', (e) => store.set('fb.games', e.target.checked ? 'on' : 'off'));
+  $('#m-easy').addEventListener('change', (e) => store.set('fb.level', e.target.checked ? 'easy' : 'hard'));
   $('#m-leave').addEventListener('click', () => {
     if (!confirm('Delete this budget from this phone?\n\nIt is not saved anywhere else. Unless family has it on their phone, or you kept a budget file, it will be gone for good.')) return;
     menu.close();

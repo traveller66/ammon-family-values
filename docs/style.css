@@ -368,6 +368,8 @@ dialog::backdrop { background: rgba(30, 15, 5, 0.55); }
 .game-help { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
 .game-help .chip { background: var(--surface); border: 2px solid var(--line-strong); color: var(--ink); min-height: 2.9rem; }
 .game-help .game-skip { flex-basis: 100%; }
+.game-help .game-level.to-easy { background: var(--good-soft); color: var(--good); border-color: var(--good); }
+.scr-progress:empty { display: none; }
 .game-win { display: grid; gap: 0.2rem; background: var(--good-soft); color: var(--good); border-radius: 18px; padding: 1rem; animation: pop 0.35s ease-out; }
 .game-win b { font-size: 1.6rem; }
 .game-win span { font-weight: 700; }

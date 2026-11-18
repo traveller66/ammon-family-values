@@ -2,7 +2,7 @@
 // Strategy: serve from the phone's copy, and refresh that copy in the background when a connection happens to be there.
 // The only thing ever fetched is the app's own files. Budget data is never sent or fetched.
 // To force an update, bump CACHE.
-const CACHE = 'ammon-family-values-v8';
+const CACHE = 'ammon-family-values-v9';
 const SHELL = [
   './', './index.html', './style.css', './app.js', './model.js', './local.js', './vault.js', './store.js',
   './lock.js', './share.js', './games.js', './puzzles.js',

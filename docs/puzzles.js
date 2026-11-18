@@ -1,4 +1,6 @@
-// The reward puzzles: a hard 9 x 9 sudoku, a three-word scramble of long words and phrases, and a big crossword.
+// The reward puzzles, each in two levels:
+//   hard: a 9 x 9 sudoku that needs the harder techniques, a three-word scramble of long words and phrases, a big crossword
+//   easy: a 9 x 9 sudoku that only needs the easy moves, a single short word to unscramble, a small crossword with plain clues
 // No DOM in here: just making and checking puzzles.
 
 const pickInt = (rng, n) => Math.floor(rng() * n);
@@ -265,11 +267,28 @@ export function gradeSudoku(cells) {
 
 const to2D = (flat) => Array.from({ length: 9 }, (_, r) => flat.slice(r * 9, r * 9 + 9));
 
+export const EASY_SUDOKU_BLANKS = 40; // 41 numbers given
+
 /**
- * A fresh hard puzzle: exactly one answer, about 22 to 32 numbers given, solvable by reasoning,
- * and needing at least one technique beyond singles.
+ * A fresh puzzle with exactly one answer.
+ *   hard: about 21 to 31 numbers given (usually 23 to 27), solvable by reasoning, and needing at least one technique beyond singles.
+ *   easy: 41 numbers given, and the easy moves (singles) alone finish it.
  */
-export function makeSudoku(rng = Math.random) {
+export function makeSudoku(rng = Math.random, level = 'hard') {
+  if (level === 'easy') {
+    const solution = fullGrid(rng);
+    const puzzle = [...solution];
+    let blanks = 0;
+    for (const i of shuffle([...Array(81).keys()], rng)) {
+      if (blanks >= EASY_SUDOKU_BLANKS) break;
+      const keep = puzzle[i];
+      puzzle[i] = 0;
+      const grade = gradeSudoku(puzzle);
+      if (grade.solved && grade.level <= 1) blanks++; // singles finishing it also proves there is only one answer
+      else puzzle[i] = keep;
+    }
+    return { puzzle: to2D(puzzle), solution: to2D(solution), level: 1, givens: 81 - blanks };
+  }
   let fallback = null;
   for (let attempt = 0; attempt < 40; attempt++) {
     const solution = fullGrid(rng);
@@ -349,13 +368,46 @@ export const SCRAMBLE_WORDS = [
   ['GAME NIGHT', 'Evening of cards and board play together'],
 ];
 
-export const SCRAMBLE_ROUND = 3; // words per puzzle
+// Easy mode: one shorter word.
+export const SCRAMBLE_EASY = [
+  ['BUDGET', 'A plan for your money'],
+  ['INCOME', 'Money that comes in'],
+  ['SAVINGS', 'Money set aside for later'],
+  ['COUPON', 'It takes a little off the price'],
+  ['WALLET', 'Where cash and cards ride along'],
+  ['SALARY', 'Yearly pay for a job'],
+  ['BARGAIN', 'A really good deal'],
+  ['RECEIPT', 'The slip that shows what you paid'],
+  ['PAYDAY', 'The best day of the pay period'],
+  ['GROCERY', 'The store with the food aisles'],
+  ['REFUND', 'Money back after a return'],
+  ['DEPOSIT', 'Money put into the bank'],
+  ['BALANCE', 'What is left in the account'],
+  ['THRIFTY', 'Careful with every dollar'],
+  ['NICKEL', 'Five-cent coin'],
+  ['QUARTER', 'Twenty-five cent coin'],
+  ['PIGGY', 'A ___ bank holds spare change'],
+  ['PENNY', 'One-cent coin'],
+  ['DOLLAR', 'One hundred cents'],
+  ['PAYCHECK', 'What an employer hands you'],
+  ['GOALS', 'What you are saving toward'],
+  ['RAINY', 'Savings are for a ___ day'],
+];
 
-/** One round: three long words or phrases in a row. Each has its letters mixed (never in the right order). */
-export function makeScramble(rng = Math.random, index = pickInt(rng, SCRAMBLE_WORDS.length)) {
+export const SCRAMBLE_ROUND = 3; // words per puzzle in hard mode
+
+/**
+ * One round, with each answer's letters mixed (never in the right order).
+ *   hard: three long words or phrases in a row
+ *   easy: one shorter word
+ */
+export function makeScramble(rng = Math.random, index = pickInt(rng, SCRAMBLE_WORDS.length), level = 'hard') {
+  const easy = level === 'easy';
+  const list = easy ? SCRAMBLE_EASY : SCRAMBLE_WORDS;
+  const count = easy ? 1 : SCRAMBLE_ROUND;
   const items = [];
-  for (let k = 0; k < SCRAMBLE_ROUND; k++) {
-    const [answer, clue] = SCRAMBLE_WORDS[(index * SCRAMBLE_ROUND + k) % SCRAMBLE_WORDS.length];
+  for (let k = 0; k < count; k++) {
+    const [answer, clue] = list[(index * count + k) % list.length];
     const word = answer.replace(/ /g, '');
     const lengths = answer.split(' ').map((w) => w.length);
     let tiles = word.split('');
@@ -587,8 +639,106 @@ export const CROSSWORD_WORDS = [
   ['OVEN', 'Where the roast goes'],
 ];
 
+// Easy mode: short everyday words with plain clues, in a small grid.
+export const CROSSWORD_EASY = [
+  ['SAVE', 'Put money aside'],
+  ['SPEND', 'Use money to buy things'],
+  ['DIME', 'Ten-cent coin'],
+  ['PENNY', 'One-cent coin'],
+  ['NICKEL', 'Five-cent coin'],
+  ['CASH', 'Bills and coins'],
+  ['COIN', 'A penny or a quarter'],
+  ['BANK', 'Where a savings account lives'],
+  ['BILL', 'It arrives and asks to be paid'],
+  ['LOAN', 'Borrowed money you pay back'],
+  ['RENT', 'Monthly payment to a landlord'],
+  ['WAGE', 'Pay for each hour worked'],
+  ['TIPS', 'Extra money left for a server'],
+  ['SALE', 'When prices are marked down'],
+  ['PRICE', 'What something costs'],
+  ['DEBT', 'Money owed'],
+  ['GOAL', 'Something you save up for'],
+  ['LIST', 'Bring one to the grocery store'],
+  ['TOTAL', 'Everything added up'],
+  ['MONEY', 'Dollars and cents'],
+  ['BUDGET', 'A plan for your money'],
+  ['PAYDAY', 'The day the paycheck comes'],
+  ['WALLET', 'Holds cash and cards'],
+  ['PURSE', 'Handbag'],
+  ['COUPON', 'It takes a little off the price'],
+  ['REFUND', 'Money back after a return'],
+  ['TAX', 'Paid to the government every April'],
+  ['FEE', 'Small charge for a service'],
+  ['EARN', 'Make money by working'],
+  ['OWE', 'Need to pay back'],
+  ['HOME', 'Where the family lives'],
+  ['FAMILY', 'Mom, Dad and the kids'],
+  ['MOM', 'Mother'],
+  ['DAD', 'Father'],
+  ['SON', 'Boy in the family'],
+  ['AUNT', "Your mom's sister"],
+  ['UNCLE', "Your dad's brother"],
+  ['BABY', 'Newest family member'],
+  ['NEST', 'Where birds live'],
+  ['DOG', 'Pet that barks'],
+  ['CAT', 'Pet that purrs'],
+  ['FISH', 'Pet in a bowl'],
+  ['BIRD', 'It flies and sings'],
+  ['TREE', 'It has a trunk and leaves'],
+  ['SUN', 'It shines in the daytime sky'],
+  ['MOON', 'It shines at night'],
+  ['STAR', 'Twinkler in the night sky'],
+  ['RAIN', 'Water falling from clouds'],
+  ['SNOW', 'Winter white stuff'],
+  ['CAKE', 'Birthday dessert'],
+  ['PIE', 'Apple ___'],
+  ['BREAD', 'Loaf for sandwiches'],
+  ['MILK', 'White drink from cows'],
+  ['EGG', 'Breakfast food from a hen'],
+  ['JAM', 'Fruit spread for toast'],
+  ['TEA', 'Hot drink made from leaves'],
+  ['SOUP', 'Bowl of chicken noodle, e.g.'],
+  ['RICE', 'Small white grains in a bowl'],
+  ['APPLE', 'Red fruit that keeps the doctor away'],
+  ['LEMON', 'Sour yellow fruit'],
+  ['GRAPE', 'It grows in bunches on a vine'],
+  ['OVEN', 'Where cookies bake'],
+  ['SINK', 'Where you wash the dishes'],
+  ['DOOR', 'You knock on it'],
+  ['ROOF', 'Top of the house'],
+  ['BED', 'Where you sleep'],
+  ['SOFA', 'Couch'],
+  ['LAMP', 'It lights up a room'],
+  ['CLOCK', 'It tells the time'],
+  ['BOOK', 'Something to read'],
+  ['GAME', 'Cards or checkers, e.g.'],
+  ['TOY', 'Something a child plays with'],
+  ['BALL', 'Round thing to throw'],
+  ['CAR', 'Family vehicle'],
+  ['BUS', 'Big yellow school ride'],
+  ['SHOP', 'Store'],
+  ['CART', 'Grocery basket on wheels'],
+  ['BAG', 'Carry your groceries in it'],
+  ['SMILE', 'Happy face'],
+  ['HUG', 'Squeeze from someone who loves you'],
+  ['LOVE', 'Strong feeling for family'],
+  ['HAPPY', 'Glad'],
+  ['ROSE', 'Red flower with thorns'],
+  ['GRASS', 'Green lawn'],
+  ['GARDEN', 'Where vegetables grow at home'],
+  ['YARD', 'Lawn around a house'],
+  ['PARK', 'Place with swings and slides'],
+  ['SCHOOL', 'Where kids learn'],
+  ['TEACHER', 'Person at the front of the class'],
+  ['PANTRY', 'Where the canned food is kept'],
+  ['DINNER', 'Evening meal'],
+  ['LUNCH', 'Midday meal'],
+];
+
 export const CROSSWORD_SIZE = { rows: 13, cols: 11 }; // fits a phone screen side to side
 export const CROSSWORD_TARGET = 24; // words per grid
+export const CROSSWORD_EASY_SIZE = { rows: 8, cols: 8 };
+export const CROSSWORD_EASY_TARGET = 8;
 
 /**
  * Lays a crossword out. `words` are { w, r, c, d: 'a'|'d', clue }. Returns the grid size, the answer letter for
@@ -670,7 +820,7 @@ export function buildCrossword(list = CROSSWORD_WORDS, rng = Math.random, { size
       .map((x) => [x, x[0].length + rng() * 6])
       .sort((a, b) => b[1] - a[1])
       .map(([x]) => x);
-    const first = pool.findIndex(([w]) => w.length >= 7 && w.length <= C);
+    const first = pool.findIndex(([w]) => w.length >= Math.min(7, C - 1) && w.length <= C);
     const [w0, clue0] = pool.splice(Math.max(first, 0), 1)[0];
     put(w0, Math.floor(R / 2), pickInt(rng, C - w0.length + 1), 'a', clue0);
     // Keep going through the pool, adding each word where it crosses the most, until the grid is full enough.
@@ -718,8 +868,10 @@ export function buildCrossword(list = CROSSWORD_WORDS, rng = Math.random, { size
   return best.words;
 }
 
-export function makeCrossword(rng = Math.random) {
+export function makeCrossword(rng = Math.random, level = 'hard') {
+  if (level === 'easy') return layCrossword(buildCrossword(CROSSWORD_EASY, rng, { size: CROSSWORD_EASY_SIZE, target: CROSSWORD_EASY_TARGET }));
   return layCrossword(buildCrossword(CROSSWORD_WORDS, rng));
 }
 
 export const GAME_KINDS = ['sudoku', 'scramble', 'crossword'];
+export const LEVELS = ['hard', 'easy'];
