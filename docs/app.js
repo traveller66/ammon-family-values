@@ -2,7 +2,7 @@
 // Stand-alone: this app has no server and makes no network requests of its own. The budget lives on this phone;
 // to share it, the person sends a locked budget file (by email, for example) and family brings it in.
 import { newFamilyKey, deriveVault, recordId, randomRecordId } from './vault.js';
-import { store } from './store.js';
+import { store, initStore, onStoreProblem } from './store.js';
 import {
   APP_NAME, DEFAULT_CATEGORIES, Budget, monthKey, shiftMonth, monthLabel,
   parseMoney, formatMoney, centsToInput, valLabel, valPayload, catPayload, helpFor,
@@ -11,6 +11,7 @@ import {
 import { LocalBook } from './local.js';
 import { wrapKey, unwrapKey, validPin } from './lock.js';
 import { sealFile, parseFile, openFile, fileName, validPassword, MIN_PASSWORD } from './share.js';
+import { isNative, writeDocument, shareTextFile, DOCUMENTS_PLACE } from './native.js';
 import { mountGame } from './games.js';
 import { GAME_KINDS } from './puzzles.js';
 
@@ -129,10 +130,11 @@ async function enter(key, creator) {
   vault = await deriveVault(key);
   if (!loadWrapped()) store.set('fb.key', key); // with the PIN lock on, the key is never stored in the clear
   budget.reset();
-  book = new LocalBook({ vault, onRecord: (rid, payload) => budget.apply(rid, payload) });
+  book = new LocalBook({ vault, onRecord: (rid, payload) => budget.apply(rid, payload), onChange: touchBackup });
   await book.start();
   show('budget');
   render();
+  renderBackup();
   if (creator) {
     store.set('fb.setup', 'todo'); // first-time setup: stays 'todo' until its last screen is reached
     await seedDefaults();
@@ -144,6 +146,7 @@ async function enter(key, creator) {
 
 const KEEP = ['fb.size', 'fb.currency', 'fb.games', 'fb.gameN', 'fb.solved', 'fb.level']; // look-and-feel choices that are not budget data
 function leaveLocal(message) {
+  clearTimeout(backupTimer);
   book = null;
   vault = null;
   familyKey = null;
@@ -903,6 +906,7 @@ async function changeSharingPassword() {
   if (!pw || !book) return;
   await book.setNote('sharepw', pw);
   toast('Sharing password changed');
+  touchBackup(); // the backup copy is locked with the same password
 }
 
 /* ------------------------------------------------------------------ send my budget (export) */
@@ -918,6 +922,7 @@ async function exportFlow() {
     pw = await askPassword({ title: 'Choose a sharing password', text: NEW_PASSWORD_TEXT });
     if (!pw || !book) return;
     await book.setNote('sharepw', pw);
+    touchBackup();
   }
   busy('Locking your budget file…');
   try {
@@ -933,7 +938,18 @@ async function exportFlow() {
   $('#dlg-export').showModal();
 }
 
-function saveExportFile() {
+async function saveExportFile() {
+  if (isNative()) {
+    try {
+      await writeDocument(fileName(), exportText);
+      markShared();
+      toast(`Saved in ${DOCUMENTS_PLACE}. Attach it to an email.`);
+    } catch (e) {
+      console.error(e);
+      toast('Could not save the file. Use "Copy it as text" instead.');
+    }
+    return;
+  }
   const url = URL.createObjectURL(new Blob([exportText], { type: 'text/plain' }));
   const a = h('a', { href: url, download: fileName() });
   document.body.append(a);
@@ -946,6 +962,22 @@ function saveExportFile() {
 
 async function shareExportFile() {
   if (!exportText) return;
+  if (isNative()) {
+    try {
+      const sent = await shareTextFile(fileName(), exportText, {
+        title: `${APP_NAME} budget`,
+        message: `Here is my latest budget file. Open ${APP_NAME}, tap the menu, then "Bring in a budget file from family".`,
+      });
+      if (sent) {
+        markShared();
+        toast('Budget file handed off');
+      }
+    } catch (e) {
+      console.error(e);
+      await saveExportFile();
+    }
+    return;
+  }
   let file = null;
   try {
     file = new File([exportText], fileName(), { type: 'text/plain' });
@@ -977,6 +1009,83 @@ async function copyExportText() {
   } catch {
     toast('Could not copy. Use "Save the file" instead.');
   }
+}
+
+/* ------------------------------------------------------------------ backup copy (installed Android app only) */
+// The budget itself lives in the app's private storage. A few seconds after every change, a locked copy is also
+// written to Documents → AmmonFamilyValues, where it survives even the app being removed. It is an ordinary budget
+// file, locked with the sharing password, so "Open a budget file" brings it back.
+const BACKUP_PASSWORD_TEXT =
+  'A locked backup copy of your budget is kept in this phone\'s Documents folder, so it can be brought back even if the app is removed. This password locks it, and it is the same password family uses to open budget files you send. Write it down somewhere safe: without it the backup cannot be opened.';
+let backupTimer = 0;
+const backupName = () => `ammon-budget-backup-${vault.bookId.slice(0, 6)}.txt`; // each budget keeps its own backup file
+
+function touchBackup() {
+  if (!isNative()) return;
+  clearTimeout(backupTimer);
+  backupTimer = setTimeout(() => saveBackup().catch((e) => console.error(e)), 4000);
+}
+
+/** Writes the backup copy now. With `ask`, first asks for a password if none has been chosen yet. */
+async function saveBackup({ ask = false } = {}) {
+  if (!isNative() || !book) return false;
+  clearTimeout(backupTimer);
+  await chain; // make sure the last edit is in
+  if (!book) return false;
+  let pw = await book.getNote('sharepw');
+  if (!validPassword(pw)) {
+    if (!ask) {
+      renderBackup();
+      return false;
+    }
+    pw = await askPassword({ title: 'Choose a backup password', text: BACKUP_PASSWORD_TEXT });
+    if (!pw || !book) return false;
+    await book.setNote('sharepw', pw);
+  }
+  let saved = false;
+  try {
+    await writeDocument(backupName(), await sealFile(pw, exportData(budget)));
+    store.set('fb.backup', String(Date.now()));
+    store.del('fb.backupError');
+    saved = true;
+  } catch (e) {
+    console.error(e);
+    store.set('fb.backupError', '1');
+  }
+  renderBackup();
+  return saved;
+}
+
+async function renderBackup() {
+  const note = $('#backup-note');
+  const menuBtn = $('#m-backup');
+  if (!isNative() || !book) {
+    note.hidden = true;
+    menuBtn.hidden = true;
+    return;
+  }
+  menuBtn.hidden = false;
+  const at = Number(store.get('fb.backup')) || 0;
+  const hasPw = validPassword(await book.getNote('sharepw'));
+  const text = $('#backup-text');
+  const go = $('#backup-go');
+  if (!hasPw) {
+    text.textContent = 'Backup copy is off. Turn it on so the budget can be brought back if this app is ever removed.';
+    go.textContent = 'Turn on the backup copy';
+    note.className = 'notice backup warn';
+  } else if (store.get('fb.backupError')) {
+    text.textContent = 'The backup copy could not be saved. Your budget itself is still safe in the app.';
+    go.textContent = 'Try again';
+    note.className = 'notice backup warn';
+  } else {
+    text.textContent = at
+      ? `Backup copy saved ${new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} in ${DOCUMENTS_PLACE}.`
+      : `A backup copy will be saved in ${DOCUMENTS_PLACE} after your next change.`;
+    go.textContent = '';
+    note.className = 'notice backup';
+  }
+  go.hidden = !go.textContent;
+  note.hidden = false;
 }
 
 /* ------------------------------------------------------------------ bring in a budget file (import) */
@@ -1043,7 +1152,10 @@ async function handleImportText(text) {
     toast('Budget opened. It now lives on this phone.');
     return;
   }
-  if (typed && !validPassword(remembered)) await book.setNote('sharepw', typed);
+  if (typed && !validPassword(remembered)) {
+    await book.setNote('sharepw', typed);
+    touchBackup();
+  }
   showPreview(planMerge(budget, clean, lastShared()));
 }
 
@@ -1214,6 +1326,11 @@ function wire() {
   $('#btn-play').addEventListener('click', playPuzzle);
   fromMenu('#m-lock', toggleLock);
   fromMenu('#m-sharepw', changeSharingPassword);
+  fromMenu('#m-backup', async () => {
+    if (await saveBackup({ ask: true })) toast(`Backup copy saved in ${DOCUMENTS_PLACE}`);
+  });
+  $('#backup-go').addEventListener('click', () => saveBackup({ ask: true }));
+  $('#welcome-backup').hidden = !isNative();
   $('#m-currency').addEventListener('change', (e) => {
     currency = e.target.value;
     store.set('fb.currency', currency);
@@ -1326,6 +1443,7 @@ function wire() {
 // This is a convenience, not a lock: what protects the budget is that it is stored on the phone, plus the PIN.
 // A browser that cannot say how the page was opened is treated as installed, so nobody is shut out of their budget.
 const inBrowserTab = () => {
+  if (isNative()) return false; // the installed Android app is never "a browser tab"
   try {
     return window.matchMedia('(display-mode: browser)').matches && navigator.standalone !== true;
   } catch {
@@ -1366,7 +1484,10 @@ async function boot() {
     show('insecure');
     return;
   }
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  onStoreProblem((msg) => toast(msg));
+  await initStore(); // in the installed Android app this reads the budget file from the phone
+  applySize();
+  if (!isNative() && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
   if (inBrowserTab()) {
     showInstallPage(); // nothing else is started: no budget is read or shown in a browser tab
     return;

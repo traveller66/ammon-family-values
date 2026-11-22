@@ -111,6 +111,8 @@ button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .hint { font-size: 0.9rem; color: var(--muted); }
 .notice { padding: 0.8rem 1rem; border-radius: 14px; font-weight: 600; margin-top: 1rem; }
 .notice.error { background: var(--bad-soft); color: var(--bad); }
+.notice.backup { display: grid; gap: 0.5rem; margin: 0.6rem 1rem 0; font-size: 0.9rem; font-weight: 600; background: var(--surface); border: 1px solid var(--line); color: var(--muted); }
+.notice.backup.warn { background: color-mix(in srgb, var(--wait) 22%, var(--surface)); border-color: var(--wait); color: var(--ink); }
 
 /* Top bar */
 .topbar {

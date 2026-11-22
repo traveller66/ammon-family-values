@@ -2,3 +2,7 @@ node_modules/
 data/
 *.tmp
 *.zip
+android/
+signing/
+*.keystore
+*.apk

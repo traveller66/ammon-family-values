@@ -5,10 +5,11 @@ import { open, seal } from './vault.js';
 import { store as defaultStore } from './store.js';
 
 export class LocalBook {
-  constructor({ vault, store = defaultStore, onRecord }) {
+  constructor({ vault, store = defaultStore, onRecord, onChange = () => {} }) {
     this.vault = vault;
     this.store = store;
     this.onRecord = onRecord; // (rid, payload) for every record found on the phone at start-up
+    this.onChange = onChange; // called after every save (the installed app refreshes its backup copy)
     this.records = {}; // rid -> {ct, iv}  (sealed)
   }
 
@@ -42,6 +43,7 @@ export class LocalBook {
 
   persist() {
     this.store.set('fb.cache', JSON.stringify({ room: this.vault.bookId, records: this.records }));
+    this.onChange();
   }
 
   /** Seal one record and save it on the phone. */

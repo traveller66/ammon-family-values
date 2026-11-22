@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { newFamilyKey, deriveVault, recordId, randomRecordId } from '../docs/vault.js';
 import { Budget, valLabel, valPayload, catPayload, helpFor, HELP, DEFAULT_CATEGORIES, exportData, cleanImport, planMerge, parseMoney } from '../docs/model.js';
 import { LocalBook } from '../docs/local.js';
-import { createMemoryStore } from '../docs/store.js';
+import { createMemoryStore, store as appStore, initStore, flushStore, onStoreProblem, resetStoreForTests } from '../docs/store.js';
+import { isNative, writeDocument, shareTextFile } from '../docs/native.js';
 import { wrapKey, unwrapKey, validPin } from '../docs/lock.js';
 import { sealFile, parseFile, openFile, validPassword, fileName } from '../docs/share.js';
 import { makeSudoku, sudokuSolved, sudokuClashes, gradeSudoku, SCRAMBLE_WORDS, SCRAMBLE_EASY, SCRAMBLE_ROUND, makeScramble, CROSSWORD_WORDS, CROSSWORD_EASY, CROSSWORD_SIZE, CROSSWORD_EASY_SIZE, makeCrossword, layCrossword, GAME_KINDS, LEVELS } from '../docs/puzzles.js';
@@ -430,6 +431,122 @@ await step('easy mode: 9 x 9 sudoku with 41 givens that singles alone finish, on
       }
     }
   }
+});
+
+console.log('\nInstalled Android app: the budget file on the phone');
+/** A pretend phone disk with the same calls the Android shell offers. */
+function fakeDisk(files = new Map()) {
+  const disk = { files, failWrites: false, writes: 0 };
+  disk.fs = {
+    async readFile({ path: p, directory }) {
+      const k = `${directory}/${p}`;
+      if (!files.has(k)) throw new Error('File does not exist');
+      return { data: files.get(k) };
+    },
+    async writeFile({ path: p, data, directory }) {
+      if (disk.failWrites) throw new Error('No space left');
+      disk.writes++;
+      files.set(`${directory}/${p}`, data);
+      return { uri: `file:///${directory}/${p}` };
+    },
+  };
+  return disk;
+}
+await step('in a browser (and these tests) nothing native is used', async () => {
+  assert.equal(isNative(), false);
+  assert.equal(await initStore(), 'browser');
+  await assert.rejects(() => writeDocument('x.txt', 'x'));
+});
+await step('the budget is kept in a file in the app\'s private storage and comes back after a restart', async () => {
+  const disk = fakeDisk();
+  assert.equal(await initStore(disk.fs), 'file');
+  appStore.set('fb.key', 'k1');
+  appStore.set('fb.cache', '{"room":"r","records":{}}');
+  appStore.set('fb.size', 'xl');
+  appStore.del('fb.size');
+  await flushStore();
+  assert.deepEqual([...disk.files.keys()].sort(), ['DATA/budget-a.json', 'DATA/budget-b.json']);
+  assert.equal(disk.files.get('DATA/budget-a.json'), disk.files.get('DATA/budget-b.json'));
+  // "restart": everything in memory is gone, only the disk is left
+  resetStoreForTests();
+  assert.equal(appStore.get('fb.key'), null);
+  await initStore(disk.fs);
+  assert.equal(appStore.get('fb.key'), 'k1');
+  assert.equal(appStore.get('fb.cache'), '{"room":"r","records":{}}');
+  assert.equal(appStore.get('fb.size'), null);
+  // a whole budget saved through the real code path survives too
+  const a = await phone(appStore);
+  const g = await a.addCat('Groceries', 'e');
+  await a.set(g, 'p', 43210);
+  await flushStore();
+  resetStoreForTests();
+  await initStore(disk.fs);
+  assert.equal((await phone(appStore, a.key)).budget.get(g, MONTH, 'p'), 43210);
+  resetStoreForTests();
+});
+await step('a half-written or damaged copy of the file is ignored and repaired from the other copy', async () => {
+  const disk = fakeDisk();
+  await initStore(disk.fs);
+  appStore.set('fb.key', 'old');
+  await flushStore();
+  appStore.set('fb.key', 'new');
+  await flushStore();
+  const good = disk.files.get('DATA/budget-b.json');
+  for (const broken of [good.slice(0, 40), '', 'not json']) {
+    disk.files.set('DATA/budget-a.json', broken); // the phone died while writing this copy
+    resetStoreForTests();
+    await initStore(disk.fs);
+    assert.equal(appStore.get('fb.key'), 'new');
+    await flushStore();
+    assert.equal(JSON.parse(disk.files.get('DATA/budget-a.json')).values['fb.key'], 'new'); // repaired
+  }
+  // one copy older than the other: the newer one wins
+  const older = JSON.parse(good);
+  older.n -= 1;
+  older.values['fb.key'] = 'stale';
+  disk.files.set('DATA/budget-b.json', JSON.stringify(older));
+  resetStoreForTests();
+  await initStore(disk.fs);
+  assert.equal(appStore.get('fb.key'), 'new');
+  disk.files.delete('DATA/budget-a.json');
+  disk.files.delete('DATA/budget-b.json');
+  resetStoreForTests();
+  await initStore(disk.fs);
+  assert.equal(appStore.get('fb.key'), null); // nothing there: a clean start, not a crash
+  resetStoreForTests();
+});
+await step('deleting the budget empties the file, and a failed save is reported instead of hidden', async () => {
+  const disk = fakeDisk();
+  await initStore(disk.fs);
+  appStore.set('fb.key', 'k');
+  appStore.clearAll();
+  await flushStore();
+  assert.deepEqual(JSON.parse(disk.files.get('DATA/budget-a.json')).values, {});
+  const problems = [];
+  onStoreProblem((m) => problems.push(m));
+  disk.failWrites = true;
+  appStore.set('fb.key', 'k2');
+  await flushStore();
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /Could not save/);
+  onStoreProblem(() => {});
+  resetStoreForTests();
+});
+await step('backup and shared files go to Documents and the share sheet, as locked text', async () => {
+  const disk = fakeDisk();
+  const a = await phone();
+  const g = await a.addCat('Groceries', 'e');
+  await a.set(g, 'a', 999);
+  const text = await sealFile('purple river toast', exportData(a.budget), FAST);
+  const made = await writeDocument('ammon-budget-backup-abc123.txt', text, disk.fs);
+  assert.match(made.place, /Documents/);
+  const onDisk = disk.files.get('DOCUMENTS/AmmonFamilyValues/ammon-budget-backup-abc123.txt');
+  assert.ok(!onDisk.includes('Groceries') && !onDisk.includes('999'));
+  assert.ok(await openFile('purple river toast', parseFile(onDisk))); // "Open a budget file" can bring it back
+  const shared = [];
+  assert.equal(await shareTextFile('f.txt', text, { title: 't', message: 'm' }, disk.fs, { share: async (o) => shared.push(o) }), true);
+  assert.deepEqual(shared[0].files, ['file:///CACHE/share/f.txt']);
+  assert.equal(await shareTextFile('f.txt', text, { title: 't', message: 'm' }, disk.fs, { share: async () => { throw new Error('Share canceled'); } }), false);
 });
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

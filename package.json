@@ -1,13 +1,22 @@
 {
   "name": "ammon-family-values",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Stand-alone family budget that lives on your own phone (installable Android web app). No server; share by emailing a locked budget file.",
+  "description": "Stand-alone family budget that lives on your own phone: an Android app (APK) that keeps the budget in a file on the phone, also installable as a web app. No server; share by emailing a locked budget file.",
   "type": "module",
   "scripts": {
     "test": "node test/app.test.mjs"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/filesystem": "~7.0.0",
+    "@capacitor/share": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0"
   }
 }

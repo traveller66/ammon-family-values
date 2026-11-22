@@ -554,6 +554,75 @@ try {
   await tab.close();
   ok('a phone that already has a budget still gets only the install page in a browser tab');
 
+  /* ---------------- the installed Android app (APK): a pretend Android shell with a pretend disk ---------------- */
+  // The real shell cannot run here, so the page is given the same calls it offers (Capacitor's Filesystem and Share),
+  // backed by a "disk" that outlives reloads. What is checked is everything the app does with them.
+  const N = await newPhone('N', { installed: false });
+  await N.page.addInitScript(() => {
+    const load = () => JSON.parse(sessionStorage.getItem('__disk') || '{}');
+    const save = (d) => sessionStorage.setItem('__disk', JSON.stringify(d));
+    window.__shared = [];
+    window.Capacitor = {
+      isNativePlatform: () => true,
+      Plugins: {
+        Filesystem: {
+          async readFile({ path, directory }) { const d = load(); const k = `${directory}/${path}`; if (!(k in d)) throw new Error('File does not exist'); return { data: d[k] }; },
+          async writeFile({ path, data, directory }) { const d = load(); d[`${directory}/${path}`] = data; save(d); return { uri: `file:///${directory}/${path}` }; },
+        },
+        Share: { async share(o) { window.__shared.push(o); return {}; } },
+      },
+    };
+  });
+  const disk = () => N.page.evaluate(() => JSON.parse(sessionStorage.getItem('__disk') || '{}'));
+  await N.page.goto(URL0);
+  await N.page.locator('#welcome:not([hidden])').waitFor(); // not the install page: the APK is the app
+  assert.equal(await N.page.isVisible('#welcome-backup'), true);
+  await N.page.click('#btn-new');
+  await N.page.click('text=Close setup');
+  await N.page.locator('#backup-note:not([hidden])').waitFor();
+  assert.match(await N.page.textContent('#backup-text'), /Backup copy is off/);
+  await noOverflow(N, 'apk backup off');
+  await shot(N, '13-apk-backup-off');
+  await N.page.click('#backup-go');
+  await N.page.fill('#pw-input', 'purple river toast');
+  await N.page.click('#pw-go');
+  await N.page.waitForFunction(() => /Backup copy saved/.test(document.querySelector('#backup-text').textContent), null, { timeout: 30000 });
+  await shot(N, '13-apk-backup-on');
+  let d = await disk();
+  const names = Object.keys(d).sort();
+  assert.ok(names.includes('DATA/budget-a.json') && names.includes('DATA/budget-b.json'), names.join());
+  const backupFile = names.find((k) => /^DOCUMENTS\/AmmonFamilyValues\/ammon-budget-backup-[0-9a-f]{6}\.txt$/.test(k));
+  assert.ok(backupFile, names.join());
+  assert.ok(!/Rent|Groceries|Paycheck/.test(JSON.stringify(d)), 'the files on the phone hold readable labels');
+  assert.equal(await N.page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('fb.')).length), 0); // nothing is in web storage
+  // a change is followed by a fresh backup copy
+  const before = d[backupFile];
+  await N.page.click('#btn-menu');
+  await N.page.click('#m-backup');
+  await N.page.waitForFunction(([k, old]) => JSON.parse(sessionStorage.getItem('__disk'))[k] !== old, [backupFile, before], { timeout: 30000 });
+  // send: the share sheet gets the file
+  await N.page.click('#btn-menu').catch(() => {});
+  if (!(await N.page.isVisible('#m-export'))) await N.page.click('#btn-menu');
+  await N.page.click('#m-export');
+  await N.page.locator('#dlg-export[open]').waitFor({ timeout: 30000 });
+  await N.page.click('#ex-share');
+  await N.page.waitForFunction(() => window.__shared.length === 1);
+  assert.match((await N.page.evaluate(() => window.__shared[0].files[0])), /^file:\/\/\/CACHE\/share\/ammon-budget-.*\.txt$/);
+  await N.page.click('#ex-save');
+  await N.page.waitForFunction(() => /Saved in Documents/.test(document.querySelector('#toast').textContent));
+  await N.page.click('#ex-close');
+  // "cache clear and restart": wipe all web storage except the pretend disk, then reopen
+  await N.page.evaluate(() => { localStorage.clear(); return caches.keys().then((ks) => Promise.all(ks.map((k) => caches.delete(k)))); });
+  await N.page.reload();
+  await N.page.locator('#budget:not([hidden])').waitFor();
+  assert.equal(await N.page.isVisible('#welcome'), false);
+  assert.match(await N.page.textContent('#backup-text'), /Backup copy saved/);
+  assert.equal(await N.page.evaluate(() => navigator.serviceWorker.getRegistrations().then((r) => r.length)), 0);
+  // the backup copy opens as an ordinary budget file with the password
+  d = await disk();
+  assert.ok(await N.page.evaluate(async ([text]) => { const m = await import('./share.js'); return !!(await m.openFile('purple river toast', m.parseFile(text))); }, [d[backupFile]]));
+  ok('as an Android app: the budget is kept in files on the phone, survives a full web-storage wipe and restart, and a locked backup copy lands in Documents');
+
   /* ---------------- nothing left the phone ---------------- */
   const bad = requests.filter((r) => !r.url.startsWith(URL0) && !r.url.startsWith('blob:') || r.method !== 'GET');
   assert.deepEqual(bad, []);

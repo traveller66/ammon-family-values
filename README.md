@@ -6,11 +6,24 @@ A family budget that installs on Android like an app and lives **only on your ow
 - **What it talks to:** nothing. The app's code contains no network calls. After the first visit it runs with no internet.
 - **Fun part:** first-time setup asks for one number at a time, and every answer is followed by a puzzle (sudoku, word scramble, crossword; hard by default, with an Easy mode button on every puzzle) that has to be solved to move on. After that, puzzles are there whenever you want one and never required.
 
+## The Android app (APK)
+
+The same app also builds as a real Android app, and that is the recommended way to use it:
+
+- **Where the budget lives:** in a file in the app's own private storage on the phone (`budget-a.json`, with a second copy `budget-b.json` in case the phone dies mid-save). Restarting the phone, clearing a cache, or clearing Chrome does not touch it. Only removing the app, or **Clear storage** for this app in Android's settings, does.
+- **Backup copy:** a few seconds after every change, a locked copy is also written to the phone's **Documents → AmmonFamilyValues** folder (`ammon-budget-backup-xxxxxx.txt`). It survives the app being removed. It is an ordinary budget file locked with the sharing password, so **Open a budget file** brings it back. Until a password is chosen, the main screen shows "Backup copy is off" with a button to turn it on.
+- **Getting it:** every push to `main` builds the APK on GitHub (free) and puts it on the Releases page. The newest is always at `https://github.com/traveller66/ammon-family-values/releases/latest/download/ammon-family-values.apk`. On the phone: open that link, open the downloaded file, allow "install unknown apps" for the browser once, Install.
+- **Updates:** download and install the newer APK the same way. It installs over the old one and the budget stays. (There are no automatic updates.)
+- **Moving from the web-app version:** the two are separate apps. In the old one: Menu → Send my budget → Save the file. In the new one: Open a budget file.
+- **One-time setup for building:** the repo needs two secrets, `ANDROID_KEYSTORE_BASE64` and `ANDROID_KEYSTORE_PASSWORD` (Settings → Secrets and variables → Actions). They are in `signing/github-secrets.txt` on the computer that has this project; that folder is never uploaded. **Keep `signing/` backed up**: every APK must be signed with the same key or Android refuses to install it over the last one.
+- **How it is built:** `.github/workflows/android.yml` wraps `docs/` in an Android shell with Capacitor (`npx cap add android`), then `tools/android-setup.mjs` sets the version number, the Documents permission for older Android, turns off Google's cloud backup of app data, and puts in the icon. The `android/` folder is generated during the build and is not kept in the repo.
+- **Not verified on a real phone or by a real build yet:** the storage, backup and share code is tested against a stand-in for the Android shell (`npm test`, and `test/browser.mjs`), but the first GitHub build and the first install are the real test.
+
 ## What is stored, and where
 
 | Thing | Where it lives |
 |---|---|
-| Item labels ("Groceries"), months, planned and actual amounts | On the phone, sealed with AES-256-GCM before being written to the browser's storage. |
+| Item labels ("Groceries"), months, planned and actual amounts | On the phone, sealed with AES-256-GCM before being written. Android app: a file in the app's private storage, plus the locked backup copy in Documents. Web app: the browser's storage for this site. |
 | The budget key | On that phone only. With the PIN lock on, it is kept only in locked form. |
 | Budget files you send | Wherever you send them (your email). They are locked with your sharing password, so email only carries scrambled text. |
 | The sharing password | In your heads, and remembered on each phone (sealed with the budget key). |
@@ -104,6 +117,7 @@ docs/local.js       sealed storage on the phone
 docs/vault.js       key derivation and AES-GCM sealing
 docs/share.js       budget files: locking with the sharing password, reading them back
 docs/lock.js        PIN lock: wraps the budget key with a PIN-derived key
+docs/native.js      Android app only: files on the phone and the share sheet
 docs/puzzles.js     sudoku maker and grader, scramble words, crossword words and grid builder (no DOM)
 docs/games.js       draws the puzzles
 docs/sw.js          offline app shell
